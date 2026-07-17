@@ -32,6 +32,43 @@ The installer is not currently code-signed, so Windows can display an **Unknown 
 - Lets every PC choose its own daily backup time.
 - Includes safe restart/watchdog behavior and persistent browser login sessions.
 
+## End-to-end product flow
+
+```mermaid
+flowchart LR
+    A[Install on department PC] --> B[Create local password]
+    B --> C[Link department WhatsApp]
+    C --> D[Choose backup folder and time]
+    D --> E[Upload or drop one XLSX workbook]
+    E --> F{Workbook valid?}
+    F -- No --> G[Quarantine with readable error]
+    F -- Yes --> H[Group demand and create drafts]
+    H --> I[Complete broker phone details]
+    I --> J[Operator reviews and explicitly sends]
+    J --> K{Send result known?}
+    K -- Sent --> L[Track sent / delivered / read]
+    K -- Definite failure --> M[Correct and explicitly retry]
+    K -- Uncertain --> N[Verify in WhatsApp before reconciliation]
+    D --> O[Scheduled or manual SQLite backup]
+```
+
+## Registered feature-flow index
+
+Every supported operational flow is assigned a stable identifier and documented in the [Feature Flow Registry](docs/FEATURE_FLOWS.md). The registry records the trigger, prerequisites, processing sequence, success state, failure/recovery behavior and data affected by each feature.
+
+| Area | Registered flows |
+| --- | --- |
+| Installation and lifecycle | `LIFE-001` to `LIFE-004` |
+| Authentication and recovery | `AUTH-001` to `AUTH-005` |
+| WhatsApp connection | `WA-001` to `WA-006` |
+| Workbook import | `IMP-001` to `IMP-004` |
+| Broker and draft management | `DRAFT-001` to `DRAFT-003` |
+| Sending and delivery safety | `SEND-001` to `SEND-006` |
+| Backups | `BACKUP-001` to `BACKUP-005` |
+| Interface and diagnostics | `UI-001` to `UI-004` |
+
+The registry is the source of truth for acceptance testing and future changes. A feature is not considered complete until its flow, failure behavior and persistence boundary are represented there.
+
 ## Independence between departments
 
 Each installation stores its operational state below its own installation directory. It does not use a shared cloud database or a machine-wide WhatsApp profile.
@@ -204,6 +241,7 @@ installer/
   output/                 Current LFS-managed installer and checksum
 docs/
   ARCHITECTURE.md          Components, data flow and safety boundaries
+  FEATURE_FLOWS.md         Registered feature and recovery flows
   OPERATIONS.md            Deployment and support runbook
 CHANGELOG.md               Release history
 ```
@@ -221,6 +259,6 @@ WhatsApp Web automation is based on the unofficial `whatsapp-web.js` integration
 ## Additional documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [Feature Flow Registry](docs/FEATURE_FLOWS.md)
 - [Operations and troubleshooting](docs/OPERATIONS.md)
 - [Release history](CHANGELOG.md)
-

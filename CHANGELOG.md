@@ -10,6 +10,8 @@
 - Add professional card, button, modal and responsive animations.
 - Remove mobile page-level horizontal overflow.
 - Add persistent-session, custom-schedule and browser-layout verification.
+- Register all supported lifecycle, authentication, WhatsApp, import, draft,
+  send, backup, interface and diagnostic flows in `docs/FEATURE_FLOWS.md`.
 
 ## 1.2.4
 
@@ -34,4 +36,3 @@
 - Added phone-code/QR WhatsApp setup and password recovery through the linked account.
 - Added safe workbook validation, explicit draft review, send idempotency and uncertain-delivery reconciliation.
 - Added scheduled local SQLite backups and Windows installer/uninstaller support.
-
