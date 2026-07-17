@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Broker Demand — WhatsApp Automation</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231c8b5a'/%3E%3Cpath d='M16 20h32l8 11-24 25L8 31z' fill='none' stroke='white' stroke-width='5' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M6 3h12l4 5-10 13L2 8l4-5Zm.9 2L4.4 8h4.2L6.9 5Zm3.8 0 2 3h2.6l2-3h-6.6Zm7.4 0-1.9 3h4.2L18.1 5ZM4.7 10l6 8.3L7.2 10H4.7Zm4.9 0 2.4 8.9L9.6 10Zm2.9 0 2 8.9 2.4-8.9h-4.4Zm4.9 0-3.4 8.3 6-8.3h-2.6Z"/>
+    </svg>
+    <div>
+      <h1>Broker Demand Desk</h1>
+      <p class="tagline">Excel → WhatsApp, automated for Prashant Sanghavi</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="live-pill"><span class="dot" id="liveDot"></span><span id="liveLabel">connecting…</span></div>
+    <button class="theme-toggle" id="changePasswordBtn" type="button">Change password</button>
+    <button class="theme-toggle" id="logoutBtn" type="button">Log out</button>
+    <button class="theme-toggle" id="themeToggle" type="button">Theme</button>
+  </div>
+</header>
+
+<div class="layout">
+  <div>
+    <div class="card">
+      <h2>WhatsApp Connection</h2>
+      <p class="muted" id="providerLabel" style="margin-top:-6px">…</p>
+      <div class="status-line">
+        <span id="statusPill" class="status-pill">…</span>
+      </div>
+      <div id="qrBox" aria-live="polite"></div>
+    </div>
+
+    <div class="card">
+      <h2>Today's Counts</h2>
+      <div class="counts">
+        <div class="count sent"><span class="n tabular" id="cSent">0</span><span class="lbl">Sent</span></div>
+        <div class="count draft"><span class="n tabular" id="cDraft">0</span><span class="lbl">Draft</span></div>
+        <div class="count needs-info"><span class="n tabular" id="cNeedsInfo">0</span><span class="lbl">Needs info</span></div>
+        <div class="count failed"><span class="n tabular" id="cFailed">0</span><span class="lbl">Attention</span></div>
+      </div>
+      <div class="progress-track" id="progressTrack">
+        <span class="seg-sent" id="segSent"></span><span class="seg-draft" id="segDraft"></span><span class="seg-needs-info" id="segNeedsInfo"></span><span class="seg-failed" id="segFailed"></span>
+      </div>
+    </div>
+
+    <div class="card backup-card" id="backupCard" aria-labelledby="backupCardTitle">
+      <div class="card-head backup-card-head">
+        <h2 id="backupCardTitle">Daily Backup</h2>
+        <span class="backup-state" id="backupState">Checking&hellip;</span>
+      </div>
+      <p class="muted backup-summary">Runs every day at <strong id="backupScheduleSummary">5:00 PM</strong> on this PC. Backups are organised automatically into year/month folders.</p>
+      <dl class="backup-details">
+        <div>
+          <dt>Folder</dt>
+          <dd class="backup-folder" id="backupFolder">Checking&hellip;</dd>
+        </div>
+        <div>
+          <dt>Last backup</dt>
+          <dd id="backupLast">&mdash;</dd>
+        </div>
+        <div>
+          <dt>Next backup</dt>
+          <dd id="backupNext">&mdash;</dd>
+        </div>
+      </dl>
+      <p class="backup-error" id="backupError" role="alert" hidden></p>
+      <div class="backup-time-control">
+        <label for="backupTimeInput">Daily time on this PC</label>
+        <div>
+          <input type="time" id="backupTimeInput" value="17:00" step="60" />
+          <button class="btn btn-sm" id="saveBackupTimeBtn" type="button">Save time</button>
+        </div>
+      </div>
+      <div class="backup-actions">
+        <button class="btn" id="chooseBackupFolderBtn" type="button">Choose folder</button>
+        <button class="btn btn-primary" id="runBackupBtn" type="button" disabled>Back up now</button>
+      </div>
+      <p class="native-dialog-hint" id="backupChooserHint" role="status" hidden>A Windows folder window is open. Choose a folder there, or press Cancel to return.</p>
+    </div>
+
+    <div class="card">
+      <h2>Manual Upload</h2>
+      <p class="muted">Fallback if you'd rather not use the drop folder.</p>
+      <div class="upload-picker">
+        <input class="visually-hidden" type="file" id="fileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+        <label class="btn file-picker-button" for="fileInput">Choose Excel file</label>
+        <span class="selected-file-name" id="selectedFileName">No file selected</span>
+      </div>
+      <button class="btn btn-primary" id="uploadBtn" type="button">Upload &amp; process</button>
+      <p id="uploadMsg" class="upload-message muted" role="status"></p>
+    </div>
+
+    <div class="card">
+      <h2>Broker Phone Numbers</h2>
+      <div class="row-form">
+        <input type="text" id="brokerName" placeholder="Broker name" style="flex:1" />
+        <input type="text" id="brokerPhone" placeholder="Phone" style="width:140px" />
+        <button class="btn btn-gold" id="saveBrokerBtn" type="button">Save</button>
+      </div>
+      <div class="search-wrap" style="max-width:none; margin-bottom:10px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="search" id="brokerSearch" placeholder="Filter brokers…" />
+      </div>
+      <div class="table-scroll">
+        <table id="brokerTable">
+          <thead><tr><th>Name</th><th>Phone</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card log-card">
+      <div class="card-head">
+        <h2>Message Log</h2>
+        <span class="muted" id="reviewHint">Review each draft, then send it — nothing goes out on its own.</span>
+      </div>
+      <div class="toolbar">
+        <div class="tabs" id="statusTabs">
+          <button data-status="" class="active">All</button>
+          <button data-status="needs_info">Needs info</button>
+          <button data-status="draft">Draft</button>
+          <button data-status="sent">Sent</button>
+          <button data-status="failed">Failed</button>
+          <button data-status="send_uncertain">Verify</button>
+        </div>
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="search" id="logSearch" placeholder="Search broker, party, phone…" />
+        </div>
+        <button class="btn" id="exportBtn" type="button">Export attention report (CSV)</button>
+      </div>
+      <div class="toolbar bulk-toolbar">
+        <button class="btn btn-sm" id="selectAllBtn" type="button">Select all drafts</button>
+        <button class="btn btn-sm btn-primary" id="sendSelectedBtn" type="button" disabled>Send selected (<span id="selectedCount">0</span>)</button>
+        <button class="btn btn-sm btn-gold" id="sendAllDraftsBtn" type="button">Send all drafts</button>
+      </div>
+      <div class="table-scroll">
+        <table id="logTable">
+          <thead>
+            <tr><th class="chk-col"><input type="checkbox" id="selectAllCheckbox" aria-label="Select all sendable messages" /></th><th>#</th><th>Date</th><th>Broker</th><th>Party</th><th>Buyer</th><th>Phone</th><th>Stones</th><th>Status</th><th>Note</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modalTitle">Message preview</h3>
+      <button class="modal-close" id="modalClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="backupSetupOverlay" style="z-index:250" role="dialog" aria-modal="true" aria-labelledby="backupSetupTitle" aria-describedby="backupSetupDescription" aria-hidden="true">
+  <div class="modal backup-setup-modal">
+    <div class="modal-head">
+      <h3 id="backupSetupTitle">Set up daily backups</h3>
+      <button class="modal-close" id="backupSetupClose" type="button" aria-label="Set up backups later">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="auth-explainer" id="backupSetupDescription">Choose a folder for this department's independent backups. The app will use the daily time selected on this PC and create the year/month folders itself.</p>
+      <div class="backup-folder-example" aria-label="Example backup folder structure">
+        <span>Selected backup folder</span>
+        <span aria-hidden="true">&boxur;&nbsp; 2026</span>
+        <span aria-hidden="true">&nbsp;&nbsp; &boxur;&nbsp; 07</span>
+      </div>
+      <p class="muted">The first backup is created after selection. Choose a location that is available to this Windows device. Nothing is shared with another department unless you intentionally select a shared drive.</p>
+      <p class="field-hint" id="backupSetupError" role="alert" hidden></p>
+      <div class="modal-footer backup-setup-actions">
+        <button class="btn" id="backupSetupLater" type="button">Not now</button>
+        <button class="btn btn-primary" id="backupSetupChoose" type="button">Choose backup folder</button>
+      </div>
+      <p class="native-dialog-hint" id="backupSetupChooserHint" role="status" hidden>A Windows folder window is open in front of this app. Choose a folder there, or press Cancel to return.</p>
+    </div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
+
+<div class="modal-backdrop open" id="authOverlay" style="z-index:300" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+  <div class="modal" style="max-width:360px">
+    <div class="modal-head"><h3 id="authTitle">Sign in</h3></div>
+    <div class="modal-body" id="authBody" aria-live="polite"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

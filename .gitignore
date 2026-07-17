@@ -1,0 +1,49 @@
+# Local agent/editor state
+.agents/
+.claude/
+.codex/
+.playwright-cli/
+.vscode/
+.idea/
+
+# Dependencies and bundled build runtime
+app/node_modules/
+installer/runtime/
+
+# Per-device application state (may contain credentials or personal data)
+app/data/
+app/incoming/
+app/processed/
+app/attachments/
+app/failed-imports/
+app/tmp/
+app/.wwebjs_auth/
+app/.wwebjs_cache/
+
+# Logs, databases, secrets and environment overrides
+*.log
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example
+
+# Generated installer files: publish only the current release and checksum
+installer/output/*
+!installer/output/BrokerDemandDesk-Setup-1.2.5.exe
+!installer/output/BrokerDemandDesk-Setup-1.2.5.exe.sha256.txt
+
+# Local test artifacts and user workbooks
+/output/
+/tmp/
+*.xlsx
+*.xls
+WhatsApp_Demand_Automation_Prompt_*.pdf
+
+# OS noise
+Thumbs.db
+Desktop.ini
+.DS_Store

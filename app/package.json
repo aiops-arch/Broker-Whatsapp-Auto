@@ -1,0 +1,19 @@
+{
+  "name": "broker-demand-whatsapp",
+  "version": "1.2.5",
+  "description": "Local app: watches a folder for the daily broker demand Excel, groups demand by broker/party, and sends WhatsApp messages via WhatsApp Web automation.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "express-session": "^1.19.0",
+    "multer": "^1.4.5-lts.1",
+    "qrcode": "^1.5.3",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}
