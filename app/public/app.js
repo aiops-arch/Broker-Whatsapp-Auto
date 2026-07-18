@@ -905,6 +905,9 @@ function deliveryBadge(row) {
   return ` <span class="delivery-badge ${d.cls}" title="${d.title}">${d.icon}</span>`;
 }
 
+// isDeliveryUnconfirmed lives in messagePatch.js (loaded before this file) so
+// its pure date-math logic is unit-testable in Node without a DOM.
+
 // Pure row-HTML builder shared by the Messages and Archive tables - the only
 // difference between the two lists is which rows they're given, never how a
 // row is drawn.
@@ -920,6 +923,9 @@ function logRowHtml(r, { waReady, canSelect, selected }) {
     ? ` <span class="tag duplicate-warning" title="Same party/stones already sent or queued to this number as message #${r.duplicate_of_id}">Possible duplicate</span>`
     : '';
   const autoTag = r.auto_sent ? ' <span class="tag auto-sent" title="Sent automatically by auto-send">Auto</span>' : '';
+  const unconfirmedTag = isDeliveryUnconfirmed(r)
+    ? ' <span class="tag delivery-unconfirmed" title="WhatsApp has not confirmed this reached its server yet - open the chat directly to check">Not confirmed</span>'
+    : '';
 
   return `
       <tr class="status-cell-row ${r.status}" data-row-id="${r.id}">
@@ -931,7 +937,7 @@ function logRowHtml(r, { waReady, canSelect, selected }) {
         <td title="${escapeHtml(r.buyer_name || '')}">${escapeHtml(r.buyer_name || '—')}</td>
         <td class="phone-cell">${escapeHtml(r.phone || '—')}</td>
         <td class="tabular">${r.stone_count}</td>
-        <td><span class="tag ${r.status}">${STATUS_LABEL[r.status] || r.status}</span>${deliveryBadge(r)}${autoTag}${duplicateTag}</td>
+        <td><span class="tag ${r.status}">${STATUS_LABEL[r.status] || r.status}</span>${deliveryBadge(r)}${autoTag}${duplicateTag}${unconfirmedTag}</td>
         <td class="${r.error ? 'error-text' : 'note-text'}">${escapeHtml(note)}</td>
         <td class="row-actions">${actions.join('')}</td>
       </tr>
@@ -1260,7 +1266,7 @@ function metaBlock(row) {
     <span><b>Buyer:</b> ${escapeHtml(row.buyer_name || '—')}</span>
     <span><b>Phone:</b> ${escapeHtml(row.phone || '—')}</span>
     <span><b>Stones:</b> ${row.stone_count}</span>
-    <span><b>Status:</b> ${STATUS_LABEL[row.status] || row.status}${deliveryBadge(row)}</span>
+    <span><b>Status:</b> ${STATUS_LABEL[row.status] || row.status}${deliveryBadge(row)}${isDeliveryUnconfirmed(row) ? ' <span class="tag delivery-unconfirmed">Not confirmed</span>' : ''}</span>
   `;
 }
 

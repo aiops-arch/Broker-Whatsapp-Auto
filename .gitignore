@@ -33,8 +33,8 @@ app/.wwebjs_cache/
 
 # Generated installer files: publish only the current release and checksum
 installer/output/*
-!installer/output/BrokerDemandDesk-Setup-1.5.2.exe
-!installer/output/BrokerDemandDesk-Setup-1.5.2.exe.sha256.txt
+!installer/output/BrokerDemandDesk-Setup-1.5.3.exe
+!installer/output/BrokerDemandDesk-Setup-1.5.3.exe.sha256.txt
 
 # Local test artifacts and user workbooks
 /output/

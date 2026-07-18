@@ -283,3 +283,18 @@ test('malformed WhatsApp acknowledgements cannot crash SQLite delivery tracking'
   assert.equal(await db.setDeliveryStatusByWaId('wamid.delivery-test', 'delivered'), true);
   assert.equal((await db.getMessage(id)).delivery_status, 'delivered');
 });
+
+test('markSent leaves delivery_status unconfirmed (null) until a real WhatsApp ack arrives', async () => {
+  // client.sendMessage() resolving only means WhatsApp Web accepted the call
+  // locally - assuming that means "delivered" is exactly what let a message
+  // to an unreachable number look identical to a real send.
+  const id = await createDraft();
+  await db.claimMessageForSend(id);
+  await db.markSent(id, 'wamid.unconfirmed-test');
+  const row = await db.getMessage(id);
+  assert.equal(row.status, 'sent');
+  assert.equal(row.delivery_status, null);
+
+  await db.setDeliveryStatusByWaId('wamid.unconfirmed-test', 'sent');
+  assert.equal((await db.getMessage(id)).delivery_status, 'sent');
+});

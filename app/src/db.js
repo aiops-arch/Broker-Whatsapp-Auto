@@ -218,11 +218,20 @@ async function claimMessageForSend(id) {
   return getMessage(id);
 }
 
+// delivery_status is deliberately left NULL here rather than assumed 'sent' -
+// client.sendMessage() resolving only means WhatsApp Web accepted the call
+// locally, not that WhatsApp's own servers actually received it (a false
+// "sent" for an address that was never reachable looked identical to a real
+// one until this distinction existed). Only a genuine 'message_ack' event
+// (see setDeliveryStatusByWaId) or an operator's own manual verification
+// (see reconcileUncertainMessage) may set delivery_status - the UI surfaces
+// a status='sent' row with a still-null delivery_status past a short
+// timeout as "not yet confirmed", per SEND-005.
 async function markSent(id, waMessageId, options = {}) {
   const info = db.prepare(`
     UPDATE messages_log
     SET status = 'sent', error = NULL, sent_at = datetime('now'), send_started_at = NULL,
-        wa_message_id = ?, delivery_status = 'sent', auto_sent = ?,
+        wa_message_id = ?, auto_sent = ?,
         archived_at = COALESCE(archived_at, datetime('now'))
     WHERE id = ? AND status = 'sending'
   `).run(waMessageId || null, options.auto === true ? 1 : 0, id);

@@ -365,6 +365,15 @@ Safety rules that apply to every flow:
 - **Failure/recovery:** Missing/malformed/internal acknowledgement IDs are ignored; database errors are contained and cannot restart the server.
 - **Persistence:** `delivery_status` only.
 
+### SEND-006a — Unconfirmed-delivery warning
+
+- **Trigger:** A row reaches `status = 'sent'` (`SEND-001` through `SEND-003`, `SEND-007`, `IMP-005`).
+- **Prerequisites:** None.
+- **Flow:** `delivery_status` starts and stays `NULL` until a genuine `message_ack` event confirms WhatsApp's own servers actually received it (`SEND-005`) - `markSent` itself never assumes this. If a row is still `sent` with a `NULL` `delivery_status` more than two minutes after `sent_at`, the UI shows a "Not confirmed" warning tag on that row (Messages, Archive, and the View modal).
+- **Success:** A message that WhatsApp never actually acknowledged is visibly distinguishable from one that quietly, genuinely confirmed - closing the gap that previously let a send to an unreachable destination look identical to a real one.
+- **Failure/recovery:** The warning is purely informational and clears itself the moment a real ack (or an operator's own manual verification via `SEND-006`) arrives - nothing is auto-retried or auto-failed.
+- **Persistence:** None beyond `delivery_status`/`sent_at`, already covered by `SEND-001`/`SEND-005`.
+
 ### SEND-006 — Interrupted/uncertain send reconciliation
 
 - **Trigger:** Process restarts while a row is `sending`, or send completion cannot be proven.
@@ -540,7 +549,7 @@ Safety rules that apply to every flow:
 | `content-duplicate.test.js` | `DRAFT-004` |
 | `auto-send.test.js` | `IMP-005`, `ARCHIVE-002` |
 | `archive.test.js` | `ARCHIVE-001`, `ARCHIVE-002` |
-| `message-patch.test.js` | `DRAFT-006` |
+| `message-patch.test.js` | `DRAFT-006`, `SEND-006a` |
 | `backup.test.js` | `BACKUP-001` to `BACKUP-005` |
 | `runtime-logger.test.js` | `UI-004` |
 | `installer-definition.test.js` | `LIFE-001`, `LIFE-002` |

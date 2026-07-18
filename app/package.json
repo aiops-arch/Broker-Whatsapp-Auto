@@ -1,6 +1,6 @@
 {
   "name": "broker-demand-whatsapp",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "Local app: watches a folder for the daily broker demand Excel, groups demand by broker/party, and sends WhatsApp messages via WhatsApp Web automation.",
   "main": "src/server.js",
   "scripts": {

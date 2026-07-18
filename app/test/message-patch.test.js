@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { withPatchedGreeting, withPatchedSignature } = require('../public/messagePatch');
+const {
+  withPatchedGreeting, withPatchedSignature, isDeliveryUnconfirmed, DELIVERY_CONFIRM_TIMEOUT_MS,
+} = require('../public/messagePatch');
 
 test('withPatchedGreeting fills in a blank greeting from a missing-broker import', () => {
   const message = "Dear ,\n\nPlease find today's demand:\n\nParty Name: Example Party\n1) StoneId: S-1";
@@ -48,4 +50,29 @@ test('withPatchedSignature appends a fresh signature when a buyer name is typed 
 test('withPatchedSignature stays a no-op on a custom sign-off when the buyer name is cleared', () => {
   const message = 'Body text with a custom sign-off - Thanks!';
   assert.equal(withPatchedSignature(message, ''), message);
+});
+
+const FIXED_NOW = Date.UTC(2026, 6, 18, 12, 0, 0);
+function sentAgo(ms) {
+  return new Date(FIXED_NOW - ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+test('isDeliveryUnconfirmed is false for a message that only just sent', () => {
+  const row = { status: 'sent', delivery_status: null, sent_at: sentAgo(1000) };
+  assert.equal(isDeliveryUnconfirmed(row, FIXED_NOW), false);
+});
+
+test('isDeliveryUnconfirmed is true once a sent message has gone unconfirmed past the timeout', () => {
+  const row = { status: 'sent', delivery_status: null, sent_at: sentAgo(DELIVERY_CONFIRM_TIMEOUT_MS + 1000) };
+  assert.equal(isDeliveryUnconfirmed(row, FIXED_NOW), true);
+});
+
+test('isDeliveryUnconfirmed is false once a real delivery_status is recorded, no matter how old', () => {
+  const row = { status: 'sent', delivery_status: 'sent', sent_at: sentAgo(DELIVERY_CONFIRM_TIMEOUT_MS * 10) };
+  assert.equal(isDeliveryUnconfirmed(row, FIXED_NOW), false);
+});
+
+test('isDeliveryUnconfirmed is false for any non-"sent" status', () => {
+  const row = { status: 'draft', delivery_status: null, sent_at: sentAgo(DELIVERY_CONFIRM_TIMEOUT_MS * 10) };
+  assert.equal(isDeliveryUnconfirmed(row, FIXED_NOW), false);
 });

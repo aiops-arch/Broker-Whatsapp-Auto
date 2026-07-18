@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.3
+
+- Add a delivery-confirmation safety net: a message is no longer assumed delivered the instant it's handed to WhatsApp. It now waits for WhatsApp's own acknowledgement before showing as confirmed, and if a "Sent" message goes more than 2 minutes with no acknowledgement at all, a "Not confirmed" warning appears on it (Messages, Archive, and the message view) so a send that silently never reached anyone doesn't just look identical to one that did.
+
 ## 1.5.2
 
 - Fix: assigning a buyer name via Edit to a draft that was originally imported with no buyer name (so it never had a "Regards," line to begin with) saved the buyer name to the database but never added a signature to the actual message text. The Edit form now appends a fresh signature in that case, instead of only ever updating one that already existed.

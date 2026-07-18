@@ -34,6 +34,21 @@ function withPatchedSignature(message, buyerName) {
   return buyerName ? [...before, '', 'Regards,', buyerName].join('\n') : before.join('\n');
 }
 
+// A 'sending' -> 'sent' transition only means WhatsApp Web accepted the call
+// locally (see db.js's markSent) - delivery_status stays null until a real
+// 'message_ack' event confirms WhatsApp's own servers actually received it.
+// Past this timeout with still no confirmation, surface it instead of
+// looking identical to a message that's fully, quietly confirmed. `now`
+// defaults to Date.now() but is injectable for deterministic tests.
+const DELIVERY_CONFIRM_TIMEOUT_MS = 2 * 60 * 1000;
+
+function isDeliveryUnconfirmed(row, now = Date.now()) {
+  if (row.status !== 'sent' || row.delivery_status || !row.sent_at) return false;
+  // SQLite's datetime('now') is UTC, formatted without a timezone suffix.
+  const sentAtMs = Date.parse(`${row.sent_at.replace(' ', 'T')}Z`);
+  return Number.isFinite(sentAtMs) && now - sentAtMs > DELIVERY_CONFIRM_TIMEOUT_MS;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { withPatchedGreeting, withPatchedSignature };
+  module.exports = { withPatchedGreeting, withPatchedSignature, isDeliveryUnconfirmed, DELIVERY_CONFIRM_TIMEOUT_MS };
 }

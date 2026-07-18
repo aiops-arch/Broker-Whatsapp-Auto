@@ -792,6 +792,7 @@ input[type="text"]:focus, input[type="search"]:focus { border-color: var(--navy)
 .tag.send_uncertain { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-border); }
 .tag.duplicate-warning { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); margin-left: 4px; }
 .tag.auto-sent { background: var(--navy-tint); color: var(--navy); margin-left: 4px; }
+.tag.delivery-unconfirmed { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); margin-left: 4px; }
 
 .toggle-row {
   display: flex;
