@@ -9,8 +9,8 @@ Broker Demand Desk is a self-contained Windows application that converts a daily
 | Item | Value |
 | --- | --- |
 | Version | `1.4.0` |
-| Installer | [`installer/output/BrokerDemandDesk-Setup-1.2.5.exe`](installer/output/BrokerDemandDesk-Setup-1.2.5.exe) *(built from 1.2.5 — run `installer/build.ps1` to produce a signed 1.4.0 installer that includes the redesigned dashboard, configurable mapping/template, and duplicate detection/auto-send below)* |
-| SHA-256 | `1C90E738D174E92AE0B21318BDA223B8D5690A42641C1D24813B79A439E4FDF3` |
+| Installer | [`installer/output/BrokerDemandDesk-Setup-1.4.0.exe`](installer/output/BrokerDemandDesk-Setup-1.4.0.exe) |
+| SHA-256 | `EA8F5C000C386DA66BB868F1F4DDC87D5BBEBC53B5C1442685786A0E400F56A2` |
 | Platform | Windows 10/11 x64 |
 | Runtime | Bundled Node.js and Chromium; no separate Node, Docker or database installation required |
 | Test status | 109 automated tests passing, plus desktop/mobile browser verification |
@@ -91,11 +91,11 @@ Do not copy the installed `data` directory between departments. Distribute only 
 
 ## Installation
 
-1. Copy `BrokerDemandDesk-Setup-1.2.5.exe` to the target Windows PC.
+1. Copy `BrokerDemandDesk-Setup-1.4.0.exe` to the target Windows PC.
 2. Optionally verify its SHA-256 checksum:
 
    ```powershell
-   Get-FileHash .\BrokerDemandDesk-Setup-1.2.5.exe -Algorithm SHA256
+   Get-FileHash .\BrokerDemandDesk-Setup-1.4.0.exe -Algorithm SHA256
    ```
 
 3. Run the installer. It installs per user and normally does not require administrator privileges.

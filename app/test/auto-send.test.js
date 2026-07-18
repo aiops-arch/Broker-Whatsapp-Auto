@@ -29,7 +29,12 @@ async function createDraft(overrides = {}) {
     demandDate: '2026-07-17',
     brokerName: `Broker ${key}`,
     partyName: `Party ${key}`,
-    phone: '9876543210',
+    // A phone number distinct from other test files' defaults (e.g.
+    // send-safety.test.js) - under the release build's
+    // --test-isolation=none, all test files share one process/database, so
+    // an identical phone+party combination across files would trip the new
+    // cross-import duplicate-content flag against an unrelated file's rows.
+    phone: '9711100000',
     message: `Message ${key}`,
     stoneCount: 1,
     sourceFile: 'test.xlsx',

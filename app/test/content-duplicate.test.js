@@ -27,7 +27,12 @@ function baseRow(overrides) {
     demandDate: '2026-07-17',
     brokerName: 'Broker X',
     partyName: 'Acme Gems',
-    phone: '9876543210',
+    // A phone number distinct from other test files' defaults (e.g.
+    // send-safety.test.js, auto-send.test.js) - under the release build's
+    // --test-isolation=none, all test files share one process/database, so
+    // an identical phone+party combination across files would trip this
+    // file's own duplicate-content checks against an unrelated file's rows.
+    phone: '9722200000',
     message: `Message ${key}`,
     stoneCount: 1,
     sourceFile: 'test.xlsx',

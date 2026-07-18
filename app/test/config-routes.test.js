@@ -158,6 +158,11 @@ test('POST /detect-headers returns the header row of an uploaded sample workbook
 
 test('GET/PUT /onboarding round-trip the completion flag', async (t) => {
   const base = await withConfigServer(t);
+  // Asserts the round-trip itself, not an assumed pristine starting value -
+  // this setting is a single global flag, so it must not assume no other
+  // test file (sharing the same process under --test-isolation=none in the
+  // release build) has already touched it.
+  await messageConfig.setOnboardingCompleted(false);
   const initial = await (await fetch(`${base}/onboarding`)).json();
   assert.equal(initial.completed, false);
 

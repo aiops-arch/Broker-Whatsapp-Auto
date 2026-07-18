@@ -136,6 +136,11 @@ test('setFieldMapping rejects an invalid mapping without persisting it', async (
 });
 
 test('onboarding completion flag round-trips through settings', async () => {
+  // Asserts the round-trip itself, not an assumed pristine starting value -
+  // this setting is a single global flag, so it must not assume no other
+  // test file (sharing the same process under --test-isolation=none in the
+  // release build) has already touched it.
+  await messageConfig.setOnboardingCompleted(false);
   assert.equal(await messageConfig.getOnboardingCompleted(), false);
   await messageConfig.setOnboardingCompleted(true);
   assert.equal(await messageConfig.getOnboardingCompleted(), true);
