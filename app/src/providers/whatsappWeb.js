@@ -523,6 +523,11 @@ class WhatsAppWebProvider extends EventEmitter {
       if (!this._isCurrentClient(client, generation)) return;
       const reasonText = reason != null ? String(reason) : '';
       const detail = reasonText ? ` (${reasonText})` : '';
+      // Logged so a future disconnect's actual WAState reason (a real
+      // connection hiccup vs. an explicit logout) is diagnosable from
+      // server.log after the fact, instead of only ever being visible as a
+      // brief status flicker in the dashboard.
+      console.log(`[whatsapp_web] disconnected${detail}.`);
 
       if (reasonText === 'LOGOUT') {
         // The phone explicitly unlinked this device - whatsapp-web.js has

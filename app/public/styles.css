@@ -601,7 +601,7 @@ a { color: var(--navy); }
   margin-top: 12px;
 }
 .connection-actions .view-link { padding: 6px 4px; }
-.muted { color: var(--ink-muted); font-size: 12.5px; }
+.muted { color: var(--ink-muted); font-size: 13.5px; }
 
 /* ===== Stat tiles ===== */
 .counts { display: flex; gap: 10px; }
@@ -937,31 +937,67 @@ input[type="text"]:focus, input[type="search"]:focus { border-color: var(--navy)
 
 /* ===== Column mapping table ===== */
 .mapping-table-wrap { overflow-x: auto; }
-.mapping-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.mapping-table { width: 100%; min-width: 880px; border-collapse: collapse; font-size: 14.5px; }
 .mapping-table th {
   text-align: left;
-  padding: 8px 8px;
+  padding: 12px 12px;
   color: var(--ink-muted);
-  font-size: 10.5px;
+  font-size: 11.5px;
   text-transform: uppercase;
-  letter-spacing: .04em;
-  border-bottom: 1px solid var(--border);
+  letter-spacing: .05em;
+  border-bottom: 2px solid var(--border-strong);
   white-space: nowrap;
 }
-.mapping-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.mapping-table input[type="text"], .mapping-table select {
+.mapping-table td { padding: 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.mapping-table tbody tr:hover { background: var(--surface-sunken); }
+.mapping-table input[type="text"] {
   width: 100%;
-  min-width: 110px;
-  padding: 5px 8px;
+  min-width: 140px;
+  padding: 9px 11px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink);
-  font-size: 12.5px;
+  font-size: 14.5px;
 }
-.mapping-table select { cursor: pointer; }
-.mapping-role-flags { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--ink-muted); white-space: nowrap; }
-.mapping-role-flags label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+/* A custom chevron replaces each browser's own native dropdown-arrow glyph
+   (inconsistent and cramped-looking across browsers at small sizes) with one
+   drawn shape that matches the app's own visual language at every zoom level. */
+.mapping-table select {
+  width: 100%;
+  min-width: 190px;
+  padding: 9px 34px 9px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+  color: var(--ink);
+  font-size: 14.5px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b6472' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+}
+.mapping-table select:hover { border-color: var(--gold); }
+:root[data-theme="dark"] .mapping-table select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2393a1af' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mapping-table select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2393a1af' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  }
+}
+.mapping-role-flags {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 8px 18px;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+.mapping-role-flags label { display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+.mapping-role-flags input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--gold); cursor: pointer; }
 .mapping-field-errors { margin: 12px 0 0; padding: 0; list-style: none; }
 .mapping-field-errors li {
   padding: 7px 10px;
