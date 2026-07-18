@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.2
+
+- Fix: assigning a buyer name via Edit to a draft that was originally imported with no buyer name (so it never had a "Regards," line to begin with) saved the buyer name to the database but never added a signature to the actual message text. The Edit form now appends a fresh signature in that case, instead of only ever updating one that already existed.
+
 ## 1.5.1
 
 - Fix: a phone number that isn't actually a registered WhatsApp account previously still showed "Sent" (WhatsApp Web accepted the send locally without a valid destination) - the app now checks with WhatsApp before sending and fails clearly instead, so "Sent" always means it really reached a real account.

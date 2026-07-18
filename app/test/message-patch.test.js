@@ -35,7 +35,17 @@ test('withPatchedSignature removes the whole signature block when the buyer name
   assert.equal(withPatchedSignature(message, ''), 'Body text');
 });
 
-test('withPatchedSignature does nothing when there is no recognizable "Regards," line', () => {
+test('withPatchedSignature appends a fresh signature when a buyer name is typed for a row imported with none', () => {
+  // Matches a real row imported with no buyer name at all (DRAFT-005's
+  // {{buyerLine}} never rendered anything), so there is no "Regards," line
+  // to find yet - assigning a buyer name here must still put a signature in
+  // the actual outgoing message, not just save buyer_name to the database.
+  const message = "Dear Broker,\n\nPlease find today's demand:\n\nParty Name: Example Party\n1) StoneId: S-1\n\n";
+  const patched = withPatchedSignature(message, 'Suyash Mishra');
+  assert.equal(patched, "Dear Broker,\n\nPlease find today's demand:\n\nParty Name: Example Party\n1) StoneId: S-1\n\nRegards,\nSuyash Mishra");
+});
+
+test('withPatchedSignature stays a no-op on a custom sign-off when the buyer name is cleared', () => {
   const message = 'Body text with a custom sign-off - Thanks!';
-  assert.equal(withPatchedSignature(message, 'Someone'), message);
+  assert.equal(withPatchedSignature(message, ''), message);
 });

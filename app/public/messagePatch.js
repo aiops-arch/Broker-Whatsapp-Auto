@@ -19,7 +19,16 @@ function withPatchedSignature(message, buyerName) {
   for (let i = lines.length - 1; i >= 0; i--) {
     if (lines[i].trim() === 'Regards,') { signatureLine = i; break; }
   }
-  if (signatureLine === -1) return message; // no recognizable signature block - leave custom wording alone
+  if (signatureLine === -1) {
+    // No existing "Regards," block - the row was most likely imported with
+    // no buyer name at all (so DRAFT-005's {{buyerLine}} never rendered one).
+    // Appending it the first time a buyer name is entered closes the loop:
+    // otherwise buyer_name silently saves to the database while the actual
+    // outgoing message text never gains a signature at all.
+    if (!buyerName) return message;
+    while (lines.length && lines[lines.length - 1] === '') lines.pop();
+    return [...lines, '', 'Regards,', buyerName].join('\n');
+  }
   const before = lines.slice(0, signatureLine);
   while (before.length && before[before.length - 1] === '') before.pop();
   return buyerName ? [...before, '', 'Regards,', buyerName].join('\n') : before.join('\n');

@@ -3,20 +3,20 @@
 ; installed on the target machine (no Node.js, no Docker - the database is
 ; an embedded SQLite file created on first run).
 
-#define MyAppVersion "1.5.1"
+#define MyAppVersion "1.5.2"
 #define MyAppPublisher "Prashant Sanghavi"
 #define MyAppExeDesc "Excel to WhatsApp demand automation"
 
 #ifdef FRESH_TEST
 #define MyAppName "Broker Demand Desk Fresh Test"
 #define MyAppId "{{F18D9C70-41AF-4F31-A707-3C1EE97523B4}"
-#define MyDefaultDirName "{localappdata}\BrokerDemandDesk-FreshTest-1.5.1"
-#define MyOutputBaseFilename "BrokerDemandDesk-Fresh-Test-1.5.1"
+#define MyDefaultDirName "{localappdata}\BrokerDemandDesk-FreshTest-1.5.2"
+#define MyOutputBaseFilename "BrokerDemandDesk-Fresh-Test-1.5.2"
 #else
 #define MyAppName "Broker Demand Desk"
 #define MyAppId "{{B5E3B8E1-6B7A-4C2B-9C5B-1B7B2B7B2B7B}"
 #define MyDefaultDirName "{localappdata}\BrokerDemandDesk"
-#define MyOutputBaseFilename "BrokerDemandDesk-Setup-1.5.1"
+#define MyOutputBaseFilename "BrokerDemandDesk-Setup-1.5.2"
 #endif
 
 [Setup]
@@ -25,8 +25,8 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppVerName={#MyAppName} {#MyAppVersion}
-VersionInfoVersion=1.5.1.0
-VersionInfoProductVersion=1.5.1.0
+VersionInfoVersion=1.5.2.0
+VersionInfoProductVersion=1.5.2.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppExeDesc}
 VersionInfoOriginalFileName={#MyOutputBaseFilename}.exe
