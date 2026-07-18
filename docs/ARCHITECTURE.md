@@ -45,11 +45,15 @@ SQLite database ----> scheduled/manual backup ----> selected YYYY/MM folder
 
 ### Import pipeline
 
-`importFiles.js`, `excelParser.js` and `watcher.js` isolate incoming content, enforce file/name/size policies, validate the XLSX structure and schema, quarantine failures and create local drafts.
+`importFiles.js`, `workbookUtils.js`, `excelParser.js` and `watcher.js` isolate incoming content, enforce file/name/size policies, validate the XLSX structure and schema, quarantine failures and create local drafts.
+
+### Configurable mapping and message template
+
+`messageConfig.js` owns each installation's column mapping and message/line-item templates (stored via `db.js`'s `app_settings` table), validates them, and safely renders templates with plain placeholder substitution (never `eval`/`Function`). `excelParser.js` reads this configuration instead of a fixed header set, so `configRoutes.js` (mounted under `/api/config` behind the same authenticated middleware as the rest of `/api`) can expose it to the Settings screen and Setup Wizard. Defaults reproduce the application's original fixed behavior exactly.
 
 ### Send coordinator
 
-`sendCoordinator.js` and `watcher.js` atomically claim rows before sending. Interrupted sends become uncertain rather than retryable, preventing silent duplicate delivery.
+`sendCoordinator.js` and `watcher.js` atomically claim rows before sending. Interrupted sends become uncertain rather than retryable, preventing silent duplicate delivery. A row flagged by `db.js`'s cross-import content-signature check (same phone/party/stones as an earlier row, any status except `failed`) is blocked from every send path except a single, explicitly confirmed Send/Retry - bulk sends and the opt-in auto-send trigger in `watcher.js` never confirm on the operator's behalf.
 
 ### WhatsApp providers
 

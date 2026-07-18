@@ -1,118 +1,17 @@
 const crypto = require('node:crypto');
-const fs = require('node:fs');
 const ExcelJS = require('exceljs');
-const { MAX_WORKBOOK_BYTES, importError } = require('./importFiles');
+const messageConfig = require('./messageConfig');
+const { normalizeHeader, cellText, formatCts, workbookError, assertRealXlsxFile } = require('./workbookUtils');
 
-const HEADER_MAP = {
-  'invoice no.': 'invoiceNo',
-  'demand date': 'demandDate',
-  'party name': 'partyName',
-  'stoneid': 'stoneId',
-  'reportno.': 'reportNo',
-  'color': 'color',
-  'clarity': 'clarity',
-  'cts': 'cts',
-  'broker name': 'brokerName',
-  'broker contact number': 'brokerPhone',
-  'buyer name': 'buyerName',
-  'attachment': 'attachmentFile',
-};
-
-const REQUIRED_HEADERS = Object.freeze({
-  invoiceNo: 'Invoice No.',
-  demandDate: 'Demand Date',
-  partyName: 'Party Name',
-  stoneId: 'StoneId',
-  reportNo: 'ReportNo.',
-  color: 'Color',
-  clarity: 'Clarity',
-  cts: 'CTS',
-  brokerName: 'Broker Name',
-  brokerPhone: 'Broker Contact Number',
-});
-
-// A row without these values cannot be grouped or identified reliably. Broker
-// details may remain blank because the dashboard deliberately supports fixing
-// them before sending.
-const REQUIRED_ROW_FIELDS = Object.freeze({
-  demandDate: 'Demand Date',
-  partyName: 'Party Name',
-  stoneId: 'StoneId',
-});
-
-function normalizeHeader(h) {
-  return String(h || '').trim().toLowerCase();
+function fieldValue(field, raw) {
+  if (field.format === 'decimal2') return formatCts(raw);
+  return cellText(raw);
 }
 
-function cellText(cell) {
-  if (cell == null) return '';
-  if (cell instanceof Date) return cell.toISOString().slice(0, 10);
-  if (typeof cell === 'object') {
-    if (cell.result != null) return cellText(cell.result);
-    if (Array.isArray(cell.richText)) return cell.richText.map((part) => part.text || '').join('').trim();
-    if (cell.text != null) return String(cell.text).trim();
-  }
-  return String(cell).trim();
-}
-
-function formatDate(v) {
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
-  return cellText(v);
-}
-
-function formatCts(v) {
-  const text = cellText(v);
-  if (!text) return '';
-  const n = Number(text);
-  return Number.isFinite(n) ? n.toFixed(2) : cellText(v);
-}
-
-function workbookError(code, message, technicalDetail) {
-  const error = importError(code, message, 422);
-  error.operatorMessage = message;
-  if (technicalDetail) error.technicalDetail = String(technicalDetail);
-  return error;
-}
-
-function assertRealXlsxFile(filePath) {
-  let stat;
-  try {
-    stat = fs.statSync(filePath);
-  } catch (error) {
-    throw workbookError('WORKBOOK_NOT_FOUND', 'The workbook file could not be found.', error.message);
-  }
-  if (!stat.isFile()) {
-    throw workbookError('WORKBOOK_NOT_FILE', 'The selected workbook is not a regular file.');
-  }
-  if (stat.size === 0) {
-    throw workbookError('EMPTY_WORKBOOK_FILE', 'The workbook is empty. Choose a populated .xlsx file.');
-  }
-  if (stat.size > MAX_WORKBOOK_BYTES) {
-    throw workbookError('WORKBOOK_TOO_LARGE', `The workbook is larger than ${Math.round(MAX_WORKBOOK_BYTES / (1024 * 1024))} MB.`);
-  }
-
-  const signature = Buffer.alloc(4);
-  const handle = fs.openSync(filePath, 'r');
-  try {
-    fs.readSync(handle, signature, 0, signature.length, 0);
-  } finally {
-    fs.closeSync(handle);
-  }
-  const isZip = signature[0] === 0x50 && signature[1] === 0x4b && (
-    (signature[2] === 0x03 && signature[3] === 0x04)
-    || (signature[2] === 0x05 && signature[3] === 0x06)
-    || (signature[2] === 0x07 && signature[3] === 0x08)
-  );
-  if (!isZip) {
-    throw workbookError(
-      'NOT_AN_XLSX_WORKBOOK',
-      'This is not a real .xlsx workbook. Open legacy .xls files in Excel and save them as .xlsx first.',
-    );
-  }
-}
-
-// Reads the dropped workbook and groups rows into one message per
-// (Broker Name, Party Name, Demand Date) group, matching the required template.
+// Reads the dropped workbook using this installation's configured column
+// mapping and message template (see messageConfig.js), and groups rows into
+// one message per configured group-role field combination (Broker Name +
+// whichever fields are marked "group", by default Party Name + Demand Date).
 async function parseWorkbook(filePath) {
   assertRealXlsxFile(filePath);
   const wb = new ExcelJS.Workbook();
@@ -130,27 +29,47 @@ async function parseWorkbook(filePath) {
   }
   const ws = wb.worksheets[0];
 
+  const fields = await messageConfig.getFieldMapping();
+  const template = await messageConfig.getMessageTemplate();
+
+  const brokerNameField = fields.find((f) => f.role === 'broker_name');
+  if (!brokerNameField) {
+    throw workbookError('MISSING_BROKER_NAME_FIELD', 'Column mapping needs exactly one broker name field. Fix this in Settings before importing.');
+  }
+  const brokerPhoneField = fields.find((f) => f.role === 'broker_phone');
+  const attachmentField = fields.find((f) => f.role === 'attachment');
+  const groupFields = fields.filter((f) => f.role === 'group');
+  const primaryGroupField = groupFields.find((f) => f.primaryGroupField) || groupFields[0];
+  const dateField = groupFields.find((f) => f.dateField);
+  const otherGroupFields = groupFields.filter((f) => f !== primaryGroupField && f !== dateField);
+  const headerFields = fields.filter((f) => f.role === 'header');
+  const buyerField = headerFields.find((f) => f.buyerField);
+  const lineFields = fields.filter((f) => f.role === 'line');
+  const dedupLineFields = lineFields.filter((f) => f.dedupComponent);
+
+  const headerLookup = new Map(fields.map((f) => [normalizeHeader(f.sourceHeader), f]));
+
   const headerRow = ws.getRow(1);
   const colIndexToField = {};
-  const foundFields = new Set();
-  const duplicateFields = new Set();
+  const foundKeys = new Set();
+  const duplicateKeys = new Set();
   headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
     const key = normalizeHeader(cellText(cell.value));
-    const field = HEADER_MAP[key];
+    const field = headerLookup.get(key);
     if (!field) return;
-    if (foundFields.has(field)) duplicateFields.add(field);
-    foundFields.add(field);
+    if (foundKeys.has(field.key)) duplicateKeys.add(field.key);
+    foundKeys.add(field.key);
     colIndexToField[colNumber] = field;
   });
 
-  if (duplicateFields.size > 0) {
-    const labels = [...duplicateFields].map((field) => REQUIRED_HEADERS[field] || field);
+  if (duplicateKeys.size > 0) {
+    const labels = [...duplicateKeys].map((key) => fields.find((f) => f.key === key)?.label || key);
     throw workbookError('DUPLICATE_WORKBOOK_HEADERS', `The header row contains duplicate columns: ${labels.join(', ')}.`);
   }
 
-  const missingHeaders = Object.entries(REQUIRED_HEADERS)
-    .filter(([field]) => !foundFields.has(field))
-    .map(([, label]) => label);
+  const missingHeaders = fields
+    .filter((f) => f.requiredHeader && !foundKeys.has(f.key))
+    .map((f) => f.label || f.sourceHeader);
   if (missingHeaders.length > 0) {
     throw workbookError('MISSING_REQUIRED_HEADERS', `Required columns are missing: ${missingHeaders.join(', ')}.`);
   }
@@ -162,87 +81,112 @@ async function parseWorkbook(filePath) {
     const rec = {};
     row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
       const field = colIndexToField[colNumber];
-      if (field) rec[field] = cell.value;
+      if (field) rec[field.key] = cell.value;
     });
     const hasMappedContent = Object.values(rec).some((value) => cellText(value) !== '');
     if (!hasMappedContent) continue;
 
-    const missingValues = Object.entries(REQUIRED_ROW_FIELDS)
-      .filter(([field]) => cellText(rec[field]) === '')
-      .map(([, label]) => label);
+    const missingValues = fields
+      .filter((f) => f.requiredRow && cellText(rec[f.key]) === '')
+      .map((f) => f.label || f.sourceHeader);
     if (missingValues.length > 0) {
       throw workbookError('MALFORMED_DATA_ROW', `Row ${r} is missing required values: ${missingValues.join(', ')}.`);
     }
 
-    const partyName = cellText(rec.partyName);
-
-    rows.push({
-      invoiceNo: cellText(rec.invoiceNo),
-      demandDate: formatDate(rec.demandDate),
-      partyName,
-      stoneId: cellText(rec.stoneId),
-      reportNo: cellText(rec.reportNo),
-      color: cellText(rec.color),
-      clarity: cellText(rec.clarity),
-      cts: formatCts(rec.cts),
-      brokerName: cellText(rec.brokerName),
-      brokerPhone: cellText(rec.brokerPhone),
-      buyerName: cellText(rec.buyerName),
-      attachmentFile: cellText(rec.attachmentFile),
-    });
+    const values = {};
+    for (const f of fields) values[f.key] = fieldValue(f, rec[f.key]);
+    rows.push(values);
   }
 
   if (rows.length === 0) {
     throw workbookError('NO_DATA_ROWS', 'The workbook has the correct headers but contains no demand rows.');
   }
 
-  // Group by broker + party + demand date
+  // Group by broker + the configured group-role fields (by default Party
+  // Name + Demand Date), same grouping semantics as the original fixed
+  // implementation but driven by whatever fields are marked "group" now.
   const groups = new Map();
-  for (const row of rows) {
-    const brokerNameRaw = row.brokerName;
-    const groupKey = `${brokerNameRaw}||${row.partyName}||${row.demandDate}`;
+  for (const values of rows) {
+    const groupFieldValues = {};
+    for (const f of groupFields) groupFieldValues[f.key] = values[f.key];
+    const otherGroupKeyParts = otherGroupFields.map((f) => values[f.key]);
+    const groupKey = [
+      values[brokerNameField.key],
+      groupFieldValues[primaryGroupField.key],
+      dateField ? groupFieldValues[dateField.key] : '',
+      ...otherGroupKeyParts,
+    ].join('||');
+
     if (!groups.has(groupKey)) {
       groups.set(groupKey, {
-        brokerName: brokerNameRaw,
-        partyName: row.partyName,
-        demandDate: row.demandDate,
-        phoneFromSheet: row.brokerPhone || null,
-        buyerName: null,
-        attachmentFile: null,
-        stones: [],
+        brokerName: values[brokerNameField.key],
+        groupFieldValues,
+        phoneFromSheet: brokerPhoneField ? (values[brokerPhoneField.key] || null) : null,
+        headerValues: {},
+        lineRows: [],
       });
     }
     const group = groups.get(groupKey);
-    if (!group.attachmentFile && row.attachmentFile) group.attachmentFile = row.attachmentFile;
-    if (!group.buyerName && row.buyerName) group.buyerName = row.buyerName;
-    group.stones.push(row);
+    for (const f of headerFields) {
+      if (!group.headerValues[f.key] && values[f.key]) group.headerValues[f.key] = values[f.key];
+    }
+    if (attachmentField && !group.headerValues[attachmentField.key] && values[attachmentField.key]) {
+      group.headerValues[attachmentField.key] = values[attachmentField.key];
+    }
+    group.lineRows.push(values);
   }
 
   const results = [];
   for (const g of groups.values()) {
-    const brokerName = g.brokerName.trim();
-    const stoneLines = g.stones
-      .map((s, i) => `${i + 1}) StoneId: ${s.stoneId} | Report#: ${s.reportNo} | Color: ${s.color} | Clarity: ${s.clarity} | Cts: ${s.cts}`)
-      .join('\n');
+    const brokerName = g.brokerName;
 
-    const dedupSource = [brokerName, g.partyName, g.demandDate, g.stones.map((s) => s.stoneId).sort().join(',')].join('|');
-    const dedupKey = crypto.createHash('sha256').update(dedupSource).digest('hex');
+    const data = { [brokerNameField.key]: brokerName };
+    if (brokerPhoneField) data[brokerPhoneField.key] = g.phoneFromSheet || '';
+    Object.assign(data, g.groupFieldValues);
+    for (const f of headerFields) data[f.key] = g.headerValues[f.key] || '';
 
-    const buyerLine = g.buyerName ? `\nBuyer Name: ${g.buyerName}` : '';
-    const message = brokerName
-      ? `Dear ${brokerName},\n\nPlease find today's demand:\n\nParty Name: ${g.partyName}${buyerLine}\n${stoneLines}\n\nRegards,\nPrashant Sanghavi`
+    const lineItems = g.lineRows
+      .map((rowValues, i) => {
+        const lineData = { index: i + 1 };
+        for (const f of lineFields) lineData[f.key] = rowValues[f.key];
+        return messageConfig.renderTemplate(template.lineItemTemplate, lineData);
+      })
+      .join(template.lineItemSeparator != null ? template.lineItemSeparator : '\n');
+    data.lineItems = lineItems;
+    data.buyerLine = (buyerField && g.headerValues[buyerField.key])
+      ? messageConfig.renderTemplate(template.buyerLineTemplate, data)
       : '';
+
+    const message = brokerName ? messageConfig.renderTemplate(template.headerTemplate, data) : '';
+
+    const perRowDedup = g.lineRows
+      .map((rowValues) => dedupLineFields.map((f) => rowValues[f.key]).join('|'))
+      .sort()
+      .join(',');
+    const dedupParts = [
+      brokerName,
+      g.groupFieldValues[primaryGroupField.key],
+      dateField ? g.groupFieldValues[dateField.key] : '',
+      ...otherGroupFields.map((f) => g.groupFieldValues[f.key]),
+      perRowDedup,
+    ];
+    const dedupKey = crypto.createHash('sha256').update(dedupParts.join('|')).digest('hex');
 
     results.push({
       brokerName,
-      partyName: g.partyName,
-      demandDate: g.demandDate,
+      partyName: g.groupFieldValues[primaryGroupField.key],
+      demandDate: dateField ? g.groupFieldValues[dateField.key] : '',
       phoneFromSheet: g.phoneFromSheet,
-      buyerName: g.buyerName || null,
-      attachmentFile: g.attachmentFile,
-      stoneCount: g.stones.length,
+      buyerName: buyerField ? (g.headerValues[buyerField.key] || null) : null,
+      attachmentFile: attachmentField ? (g.headerValues[attachmentField.key] || null) : null,
+      stoneCount: g.lineRows.length,
       message,
       dedupKey,
+      // Same sorted dedup-component values used above, but WITHOUT the
+      // broker/date baked in - lets db.js detect a "possible duplicate" for
+      // the same party+stones reaching the same phone from a DIFFERENT
+      // import/file, which dedupKey alone cannot do.
+      dedupComponentSignature: perRowDedup,
     });
   }
 

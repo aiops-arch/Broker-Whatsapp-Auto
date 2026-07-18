@@ -41,6 +41,7 @@ const {
   queueUploadedWorkbook,
 } = require('./watcher');
 const { parseWorkbook } = require('./excelParser');
+const { createConfigRouter } = require('./configRoutes');
 const {
   MAX_WORKBOOK_BYTES,
   UPLOAD_LIMITS,
@@ -548,6 +549,16 @@ async function main() {
     }
   });
 
+  // ---------- Configurable column mapping and message template ----------
+  // Lets each installation map its own workbook's column names onto the
+  // fields the app understands, and customize the WhatsApp message text,
+  // instead of requiring the original fixed headers/wording. Defaults
+  // reproduce the application's original fixed behavior exactly, so existing
+  // installations are unaffected until an operator changes Settings. Routes
+  // live in their own module so they can be exercised in tests without the
+  // full app (WhatsApp provider, session store, watcher) running.
+  app.use('/api/config', createConfigRouter({ upload, fs }));
+
   app.get('/api/brokers', async (req, res) => {
     res.json(await db.listBrokers());
   });
@@ -624,12 +635,23 @@ async function main() {
     }
   });
 
-  // Explicit, one-at-a-time send - this is the only way a message ever goes out.
+  // Explicit, one-at-a-time send - this is the only way a message ever goes
+  // out (aside from an opt-in auto-send, which never confirms a duplicate).
+  // A row flagged as a possible duplicate requires one extra explicit
+  // confirmation before it is actually sent.
   app.post('/api/logs/:id/send', async (req, res) => {
     const id = Number(req.params.id);
     const row = await db.getMessage(id);
     if (!row) return res.status(404).json({ error: 'not found' });
-    const [result] = await sendMessagesByIds([id], whatsapp);
+    if (row.duplicate_of_id && req.body?.confirmDuplicate !== true) {
+      return res.status(409).json({
+        error: `Possible duplicate of message #${row.duplicate_of_id} (same party/stones already sent or queued to this number).`,
+        code: 'POSSIBLE_DUPLICATE',
+        duplicateOfId: row.duplicate_of_id,
+        requiresConfirmation: true,
+      });
+    }
+    const [result] = await sendMessagesByIds([id], whatsapp, { confirmedIds: [id] });
     if (!result || !result.ok) return res.status(400).json({ error: (result && result.error) || 'Send failed', blocked: result?.blocked });
     res.json({ ok: true });
   });
@@ -639,7 +661,15 @@ async function main() {
     const id = Number(req.params.id);
     const row = await db.getMessage(id);
     if (!row) return res.status(404).json({ error: 'not found' });
-    const [result] = await sendMessagesByIds([id], whatsapp);
+    if (row.duplicate_of_id && req.body?.confirmDuplicate !== true) {
+      return res.status(409).json({
+        error: `Possible duplicate of message #${row.duplicate_of_id} (same party/stones already sent or queued to this number).`,
+        code: 'POSSIBLE_DUPLICATE',
+        duplicateOfId: row.duplicate_of_id,
+        requiresConfirmation: true,
+      });
+    }
+    const [result] = await sendMessagesByIds([id], whatsapp, { confirmedIds: [id] });
     if (!result || !result.ok) return res.status(400).json({ error: (result && result.error) || 'Retry failed', blocked: result?.blocked });
     res.json({ ok: true });
   });
@@ -667,11 +697,18 @@ async function main() {
     res.write('retry: 2000\n\n');
 
     const send = () => res.write('data: update\n\n');
+    // A named event carrying import-outcome counts (new/skipped-duplicate/
+    // possible-duplicate), so a duplicate re-import doesn't look identical to
+    // a fresh one - see the plain "update" ping above, which only triggers a
+    // silent data refresh.
+    const sendImportSummary = (summary) => res.write(`event: import-summary\ndata: ${JSON.stringify(summary)}\n\n`);
     bus.on('update', send);
+    bus.on('import-summary', sendImportSummary);
     const heartbeat = setInterval(() => res.write(':hb\n\n'), 20000);
 
     req.on('close', () => {
       bus.off('update', send);
+      bus.off('import-summary', sendImportSummary);
       clearInterval(heartbeat);
     });
   });

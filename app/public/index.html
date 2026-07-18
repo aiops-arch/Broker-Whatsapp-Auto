@@ -16,7 +16,7 @@
     </svg>
     <div>
       <h1>Broker Demand Desk</h1>
-      <p class="tagline">Excel → WhatsApp, automated for Prashant Sanghavi</p>
+      <p class="tagline">Excel → WhatsApp, configured your way</p>
     </div>
   </div>
   <div class="topbar-right">
@@ -27,133 +27,270 @@
   </div>
 </header>
 
-<div class="layout">
-  <div>
-    <div class="card">
-      <h2>WhatsApp Connection</h2>
-      <p class="muted" id="providerLabel" style="margin-top:-6px">…</p>
-      <div class="status-line">
-        <span id="statusPill" class="status-pill">…</span>
-      </div>
-      <div id="qrBox" aria-live="polite"></div>
-    </div>
+<div class="app-shell">
+  <nav class="sidebar" id="sidebar" aria-label="Sections">
+    <button class="nav-item active" type="button" data-view="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      <span>Dashboard</span>
+    </button>
+    <button class="nav-item" type="button" data-view="messages">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 5h16v10H8l-4 4V5Z"/></svg>
+      <span>Messages</span>
+      <span class="nav-badge" id="navAttentionBadge" hidden>0</span>
+    </button>
+    <button class="nav-item" type="button" data-view="brokers">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>
+      <span>Brokers</span>
+    </button>
+    <button class="nav-item" type="button" data-view="backups">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4 4 0 0 1-1 7.9H7Z"/></svg>
+      <span>Backups</span>
+    </button>
+    <button class="nav-item" type="button" data-view="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a7.97 7.97 0 0 0 0-3l2-1.5-2-3.4-2.3.9a8 8 0 0 0-2.6-1.5L14 2h-4l-.5 2.9a8 8 0 0 0-2.6 1.5l-2.3-.9-2 3.4 2 1.5a8 8 0 0 0 0 3l-2 1.6 2 3.4 2.3-1a8 8 0 0 0 2.6 1.5L10 22h4l.5-2.9a8 8 0 0 0 2.6-1.5l2.3 1 2-3.4-2-1.6Z"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
 
-    <div class="card">
-      <h2>Today's Counts</h2>
-      <div class="counts">
-        <div class="count sent"><span class="n tabular" id="cSent">0</span><span class="lbl">Sent</span></div>
-        <div class="count draft"><span class="n tabular" id="cDraft">0</span><span class="lbl">Draft</span></div>
-        <div class="count needs-info"><span class="n tabular" id="cNeedsInfo">0</span><span class="lbl">Needs info</span></div>
-        <div class="count failed"><span class="n tabular" id="cFailed">0</span><span class="lbl">Attention</span></div>
-      </div>
-      <div class="progress-track" id="progressTrack">
-        <span class="seg-sent" id="segSent"></span><span class="seg-draft" id="segDraft"></span><span class="seg-needs-info" id="segNeedsInfo"></span><span class="seg-failed" id="segFailed"></span>
-      </div>
-    </div>
+  <main class="main" id="main">
 
-    <div class="card backup-card" id="backupCard" aria-labelledby="backupCardTitle">
-      <div class="card-head backup-card-head">
-        <h2 id="backupCardTitle">Daily Backup</h2>
-        <span class="backup-state" id="backupState">Checking&hellip;</span>
+    <section class="view active" data-view="dashboard" id="view-dashboard">
+      <div class="view-header">
+        <h2>Dashboard</h2>
+        <p class="muted">Live status for this installation.</p>
       </div>
-      <p class="muted backup-summary">Runs every day at <strong id="backupScheduleSummary">5:00 PM</strong> on this PC. Backups are organised automatically into year/month folders.</p>
-      <dl class="backup-details">
+      <div class="dashboard-grid">
         <div>
-          <dt>Folder</dt>
-          <dd class="backup-folder" id="backupFolder">Checking&hellip;</dd>
+          <div class="card">
+            <h2>WhatsApp Connection</h2>
+            <p class="muted" id="providerLabel" style="margin-top:-6px">…</p>
+            <div class="status-line">
+              <span id="statusPill" class="status-pill">…</span>
+            </div>
+            <div id="qrBox" aria-live="polite"></div>
+          </div>
         </div>
         <div>
-          <dt>Last backup</dt>
-          <dd id="backupLast">&mdash;</dd>
-        </div>
-        <div>
-          <dt>Next backup</dt>
-          <dd id="backupNext">&mdash;</dd>
-        </div>
-      </dl>
-      <p class="backup-error" id="backupError" role="alert" hidden></p>
-      <div class="backup-time-control">
-        <label for="backupTimeInput">Daily time on this PC</label>
-        <div>
-          <input type="time" id="backupTimeInput" value="17:00" step="60" />
-          <button class="btn btn-sm" id="saveBackupTimeBtn" type="button">Save time</button>
+          <div class="card">
+            <h2>Today's Counts</h2>
+            <div class="counts">
+              <div class="count sent"><span class="n tabular" id="cSent">0</span><span class="lbl">Sent</span></div>
+              <div class="count draft"><span class="n tabular" id="cDraft">0</span><span class="lbl">Draft</span></div>
+              <div class="count needs-info"><span class="n tabular" id="cNeedsInfo">0</span><span class="lbl">Needs info</span></div>
+              <div class="count failed"><span class="n tabular" id="cFailed">0</span><span class="lbl">Attention</span></div>
+            </div>
+            <div class="progress-track" id="progressTrack">
+              <span class="seg-sent" id="segSent"></span><span class="seg-draft" id="segDraft"></span><span class="seg-needs-info" id="segNeedsInfo"></span><span class="seg-failed" id="segFailed"></span>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="backup-actions">
-        <button class="btn" id="chooseBackupFolderBtn" type="button">Choose folder</button>
-        <button class="btn btn-primary" id="runBackupBtn" type="button" disabled>Back up now</button>
-      </div>
-      <p class="native-dialog-hint" id="backupChooserHint" role="status" hidden>A Windows folder window is open. Choose a folder there, or press Cancel to return.</p>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>Manual Upload</h2>
-      <p class="muted">Fallback if you'd rather not use the drop folder.</p>
-      <div class="upload-picker">
-        <input class="visually-hidden" type="file" id="fileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-        <label class="btn file-picker-button" for="fileInput">Choose Excel file</label>
-        <span class="selected-file-name" id="selectedFileName">No file selected</span>
-      </div>
-      <button class="btn btn-primary" id="uploadBtn" type="button">Upload &amp; process</button>
-      <p id="uploadMsg" class="upload-message muted" role="status"></p>
-    </div>
-
-    <div class="card">
-      <h2>Broker Phone Numbers</h2>
-      <div class="row-form">
-        <input type="text" id="brokerName" placeholder="Broker name" style="flex:1" />
-        <input type="text" id="brokerPhone" placeholder="Phone" style="width:140px" />
-        <button class="btn btn-gold" id="saveBrokerBtn" type="button">Save</button>
-      </div>
-      <div class="search-wrap" style="max-width:none; margin-bottom:10px">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-        <input type="search" id="brokerSearch" placeholder="Filter brokers…" />
-      </div>
-      <div class="table-scroll">
-        <table id="brokerTable">
-          <thead><tr><th>Name</th><th>Phone</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <div>
-    <div class="card log-card">
-      <div class="card-head">
-        <h2>Message Log</h2>
+    <section class="view" data-view="messages" id="view-messages">
+      <div class="view-header">
+        <h2>Messages</h2>
         <span class="muted" id="reviewHint">Review each draft, then send it — nothing goes out on its own.</span>
       </div>
-      <div class="toolbar">
-        <div class="tabs" id="statusTabs">
-          <button data-status="" class="active">All</button>
-          <button data-status="needs_info">Needs info</button>
-          <button data-status="draft">Draft</button>
-          <button data-status="sent">Sent</button>
-          <button data-status="failed">Failed</button>
-          <button data-status="send_uncertain">Verify</button>
+
+      <div class="card">
+        <h2>Manual Upload</h2>
+        <p class="muted">Fallback if you'd rather not use the drop folder.</p>
+        <div class="upload-picker">
+          <input class="visually-hidden" type="file" id="fileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+          <label class="btn file-picker-button" for="fileInput">Choose Excel file</label>
+          <span class="selected-file-name" id="selectedFileName">No file selected</span>
         </div>
-        <div class="search-wrap">
+        <button class="btn btn-primary" id="uploadBtn" type="button">Upload &amp; process</button>
+        <p id="uploadMsg" class="upload-message muted" role="status"></p>
+      </div>
+
+      <div class="card log-card">
+        <div class="card-head">
+          <h2>Message Log</h2>
+        </div>
+        <div class="toolbar">
+          <div class="tabs" id="statusTabs">
+            <button data-status="" class="active">All</button>
+            <button data-status="needs_info">Needs info</button>
+            <button data-status="draft">Draft</button>
+            <button data-status="sent">Sent</button>
+            <button data-status="failed">Failed</button>
+            <button data-status="send_uncertain">Verify</button>
+          </div>
+          <div class="search-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="search" id="logSearch" placeholder="Search broker, party, phone…" />
+          </div>
+          <button class="btn" id="exportBtn" type="button">Export attention report (CSV)</button>
+        </div>
+        <div class="toolbar bulk-toolbar">
+          <button class="btn btn-sm" id="selectAllBtn" type="button">Select all drafts</button>
+          <button class="btn btn-sm btn-primary" id="sendSelectedBtn" type="button" disabled>Send selected (<span id="selectedCount">0</span>)</button>
+          <button class="btn btn-sm btn-gold" id="sendAllDraftsBtn" type="button">Send all drafts</button>
+        </div>
+        <div class="table-scroll">
+          <table id="logTable">
+            <thead>
+              <tr><th class="chk-col"><input type="checkbox" id="selectAllCheckbox" aria-label="Select all sendable messages" /></th><th>#</th><th>Date</th><th>Broker</th><th>Party</th><th>Buyer</th><th>Phone</th><th>Stones</th><th>Status</th><th>Note</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" data-view="brokers" id="view-brokers">
+      <div class="view-header">
+        <h2>Brokers</h2>
+        <p class="muted">Keep phone numbers up to date so drafts can be sent.</p>
+      </div>
+      <div class="card">
+        <h2>Broker Phone Numbers</h2>
+        <div class="row-form">
+          <input type="text" id="brokerName" placeholder="Broker name" style="flex:1" />
+          <input type="text" id="brokerPhone" placeholder="Phone" style="width:140px" />
+          <button class="btn btn-gold" id="saveBrokerBtn" type="button">Save</button>
+        </div>
+        <div class="search-wrap" style="max-width:none; margin-bottom:10px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-          <input type="search" id="logSearch" placeholder="Search broker, party, phone…" />
+          <input type="search" id="brokerSearch" placeholder="Filter brokers…" />
         </div>
-        <button class="btn" id="exportBtn" type="button">Export attention report (CSV)</button>
+        <div class="table-scroll">
+          <table id="brokerTable">
+            <thead><tr><th>Name</th><th>Phone</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
-      <div class="toolbar bulk-toolbar">
-        <button class="btn btn-sm" id="selectAllBtn" type="button">Select all drafts</button>
-        <button class="btn btn-sm btn-primary" id="sendSelectedBtn" type="button" disabled>Send selected (<span id="selectedCount">0</span>)</button>
-        <button class="btn btn-sm btn-gold" id="sendAllDraftsBtn" type="button">Send all drafts</button>
+    </section>
+
+    <section class="view" data-view="backups" id="view-backups">
+      <div class="view-header">
+        <h2>Backups</h2>
+        <p class="muted">Independent, local, scheduled backups for this PC.</p>
       </div>
-      <div class="table-scroll">
-        <table id="logTable">
-          <thead>
-            <tr><th class="chk-col"><input type="checkbox" id="selectAllCheckbox" aria-label="Select all sendable messages" /></th><th>#</th><th>Date</th><th>Broker</th><th>Party</th><th>Buyer</th><th>Phone</th><th>Stones</th><th>Status</th><th>Note</th><th></th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+      <div class="card backup-card" id="backupCard" aria-labelledby="backupCardTitle">
+        <div class="card-head backup-card-head">
+          <h2 id="backupCardTitle">Daily Backup</h2>
+          <span class="backup-state" id="backupState">Checking&hellip;</span>
+        </div>
+        <p class="muted backup-summary">Runs every day at <strong id="backupScheduleSummary">5:00 PM</strong> on this PC. Backups are organised automatically into year/month folders.</p>
+        <dl class="backup-details">
+          <div>
+            <dt>Folder</dt>
+            <dd class="backup-folder" id="backupFolder">Checking&hellip;</dd>
+          </div>
+          <div>
+            <dt>Last backup</dt>
+            <dd id="backupLast">&mdash;</dd>
+          </div>
+          <div>
+            <dt>Next backup</dt>
+            <dd id="backupNext">&mdash;</dd>
+          </div>
+        </dl>
+        <p class="backup-error" id="backupError" role="alert" hidden></p>
+        <div class="backup-time-control">
+          <label for="backupTimeInput">Daily time on this PC</label>
+          <div>
+            <input type="time" id="backupTimeInput" value="17:00" step="60" />
+            <button class="btn btn-sm" id="saveBackupTimeBtn" type="button">Save time</button>
+          </div>
+        </div>
+        <div class="backup-actions">
+          <button class="btn" id="chooseBackupFolderBtn" type="button">Choose folder</button>
+          <button class="btn btn-primary" id="runBackupBtn" type="button" disabled>Back up now</button>
+        </div>
+        <p class="native-dialog-hint" id="backupChooserHint" role="status" hidden>A Windows folder window is open. Choose a folder there, or press Cancel to return.</p>
       </div>
-    </div>
-  </div>
+    </section>
+
+    <section class="view" data-view="settings" id="view-settings">
+      <div class="view-header">
+        <h2>Settings</h2>
+        <p class="muted">Map your workbook's columns and customize how messages are written.</p>
+      </div>
+
+      <div class="card" id="mappingCard">
+        <div class="card-head">
+          <h2>Column Mapping</h2>
+          <button class="btn btn-sm" id="resetMappingBtn" type="button">Reset to default</button>
+        </div>
+        <p class="muted settings-section-note">Map each field to the exact column name used in your workbook. Changing this only affects workbooks imported from now on.</p>
+        <div class="detect-headers-picker">
+          <input class="visually-hidden" type="file" id="detectHeadersInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+          <label class="btn file-picker-button" for="detectHeadersInput">Auto-detect from a sample file</label>
+          <span class="muted" id="detectHeadersHint">Optional — reads only the header row.</span>
+        </div>
+        <ul class="mapping-field-errors" id="mappingErrors" hidden></ul>
+        <div class="mapping-table-wrap">
+          <table class="mapping-table" id="mappingTable">
+            <thead>
+              <tr><th>Field</th><th>Your column name</th><th>Role</th><th>Options</th><th></th></tr>
+            </thead>
+            <tbody id="mappingTableBody"></tbody>
+          </table>
+        </div>
+        <div class="modal-footer" style="justify-content:space-between; margin-top:14px">
+          <button class="btn btn-sm" id="addMappingFieldBtn" type="button">Add field</button>
+          <button class="btn btn-primary" id="saveMappingBtn" type="button">Save mapping</button>
+        </div>
+      </div>
+
+      <div class="card" id="templateCard">
+        <div class="card-head">
+          <h2>Message Template</h2>
+          <button class="btn btn-sm" id="resetTemplateBtn" type="button">Reset to default</button>
+        </div>
+        <p class="muted settings-section-note">Write the message once using <code>{{placeholders}}</code>. Click a chip below to insert it into the focused field.</p>
+        <div class="placeholder-chip-list" id="templatePlaceholderChips"></div>
+        <div class="template-editor-grid">
+          <div>
+            <div class="field-group">
+              <label for="headerTemplateInput">Message template</label>
+              <textarea id="headerTemplateInput" rows="8"></textarea>
+            </div>
+            <div class="field-group">
+              <label for="lineItemTemplateInput">Line item template (repeats once per row)</label>
+              <textarea id="lineItemTemplateInput" rows="3"></textarea>
+            </div>
+            <div class="field-group">
+              <label for="buyerLineTemplateInput">Buyer line (only shown when a buyer is present)</label>
+              <textarea id="buyerLineTemplateInput" rows="2"></textarea>
+            </div>
+          </div>
+          <div>
+            <p class="template-preview-label">Live preview</p>
+            <div class="template-preview" id="templatePreview">Preview will appear here…</div>
+          </div>
+        </div>
+        <div class="modal-footer" style="justify-content:flex-end; margin-top:4px">
+          <button class="btn btn-primary" id="saveTemplateBtn" type="button">Save template</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Automatic Sending</h2>
+        </div>
+        <label class="toggle-row" for="autoSendToggle">
+          <input type="checkbox" id="autoSendToggle" />
+          <span>Automatically send complete, non-duplicate drafts as soon as they're imported</span>
+        </label>
+        <p class="muted settings-section-note" style="margin-top:10px">
+          When enabled, a row sends the moment it's imported only if the broker and phone are known, WhatsApp is connected, and it has no possible-duplicate warning. Rows needing information, or flagged as a possible duplicate, always wait for you - this never changes. Turning this on does not affect drafts already sitting in the queue, only new imports from now on.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>Setup Wizard</h2>
+        <p class="muted settings-section-note">Walk through column mapping, message template, and backup setup again.</p>
+        <button class="btn" id="rerunWizardBtn" type="button">Restart setup wizard</button>
+      </div>
+    </section>
+
+  </main>
 </div>
 
 <div class="modal-backdrop" id="modalBackdrop">
@@ -166,27 +303,17 @@
   </div>
 </div>
 
-<div class="modal-backdrop" id="backupSetupOverlay" style="z-index:250" role="dialog" aria-modal="true" aria-labelledby="backupSetupTitle" aria-describedby="backupSetupDescription" aria-hidden="true">
-  <div class="modal backup-setup-modal">
+<div class="modal-backdrop" id="setupWizardOverlay" style="z-index:250" role="dialog" aria-modal="true" aria-labelledby="wizardTitle" aria-hidden="true">
+  <div class="modal wizard-modal">
     <div class="modal-head">
-      <h3 id="backupSetupTitle">Set up daily backups</h3>
-      <button class="modal-close" id="backupSetupClose" type="button" aria-label="Set up backups later">&times;</button>
+      <h3 id="wizardTitle">Set up Broker Demand Desk</h3>
+      <button class="modal-close" id="wizardClose" type="button" aria-label="Not now">&times;</button>
     </div>
-    <div class="modal-body">
-      <p class="auth-explainer" id="backupSetupDescription">Choose a folder for this department's independent backups. The app will use the daily time selected on this PC and create the year/month folders itself.</p>
-      <div class="backup-folder-example" aria-label="Example backup folder structure">
-        <span>Selected backup folder</span>
-        <span aria-hidden="true">&boxur;&nbsp; 2026</span>
-        <span aria-hidden="true">&nbsp;&nbsp; &boxur;&nbsp; 07</span>
-      </div>
-      <p class="muted">The first backup is created after selection. Choose a location that is available to this Windows device. Nothing is shared with another department unless you intentionally select a shared drive.</p>
-      <p class="field-hint" id="backupSetupError" role="alert" hidden></p>
-      <div class="modal-footer backup-setup-actions">
-        <button class="btn" id="backupSetupLater" type="button">Not now</button>
-        <button class="btn btn-primary" id="backupSetupChoose" type="button">Choose backup folder</button>
-      </div>
-      <p class="native-dialog-hint" id="backupSetupChooserHint" role="status" hidden>A Windows folder window is open in front of this app. Choose a folder there, or press Cancel to return.</p>
+    <div class="wizard-steps" id="wizardSteps" aria-hidden="true">
+      <span data-step="1"></span><span data-step="2"></span><span data-step="3"></span><span data-step="4"></span>
     </div>
+    <p class="wizard-step-label" id="wizardStepLabel">Welcome</p>
+    <div class="modal-body" id="wizardBody" aria-live="polite"></div>
   </div>
 </div>
 

@@ -16,10 +16,11 @@ Each flow records:
 Safety rules that apply to every flow:
 
 1. Department installations remain independent.
-2. No message is sent without an explicit operator action.
+2. No message is sent without an explicit operator action, except an opt-in, off-by-default auto-send of a just-completed import's own complete, non-duplicate-flagged rows (`IMP-005`).
 3. Unknown delivery is never treated as a definite failure or retried automatically.
 4. Operational secrets and WhatsApp profiles remain local and are never committed to Git.
 5. Upgrades preserve device data unless the operator explicitly requests removal.
+6. A possible duplicate (same party/stones reaching the same phone number from a different import) is flagged, never silently sent and never hard-blocked - one explicit operator confirmation lets it through (`DRAFT-004`, `SEND-007`).
 
 ---
 
@@ -208,6 +209,24 @@ Safety rules that apply to every flow:
 - **Failure/recovery:** Collision retries with a suffix; failed import is retained with timestamped name/error sidecar.
 - **Persistence:** Sanitized local filename.
 
+### IMP-005 — Opt-in auto-send of a completed import
+
+- **Trigger:** A workbook import finishes successfully and the operator has turned on **Automatic sending** in Settings.
+- **Prerequisites:** WhatsApp ready; setting enabled.
+- **Flow:** Only the rows just created by this import are handed to the same send path bulk-send uses; a row sends only if it is complete (broker and phone known), carries no possible-duplicate flag, and WhatsApp is ready.
+- **Success:** Eligible rows are marked `sent` and tagged as auto-sent; ineligible rows (`needs_info`, duplicate-flagged, or WhatsApp not ready) are left untouched for manual review.
+- **Failure/recovery:** The setting never retroactively sends drafts already sitting in the queue from before it was enabled or from an earlier import. A send failure during auto-send follows the same per-row failure/uncertain handling as any other send.
+- **Persistence:** `auto_send_enabled` setting; `auto_sent` flag on sent rows.
+
+### IMP-006 — Duplicate-import visibility
+
+- **Trigger:** A workbook import completes (upload or drop-folder), whether or not it introduced any new rows.
+- **Prerequisites:** None.
+- **Flow:** The count of newly inserted rows, exact re-import duplicates skipped, and possible-duplicate rows flagged is published as an import summary, shown to the operator as a toast.
+- **Success:** Re-importing an already-imported workbook is visibly reported as "0 new, N already imported" instead of looking identical to a fresh import.
+- **Failure/recovery:** A concurrent import racing an exact duplicate row is skipped and counted, not treated as a fatal error that quarantines the rest of the file.
+- **Persistence:** None beyond the existing `messages_log` rows already covered by `DRAFT-002`.
+
 ---
 
 ## Broker and draft management
@@ -238,6 +257,15 @@ Safety rules that apply to every flow:
 - **Success:** Complete row becomes sendable draft.
 - **Failure/recovery:** Sent/sending/uncertain rows are not silently edited into a retryable state.
 - **Persistence:** Updated message row and optional broker phone.
+
+### DRAFT-004 — Possible-duplicate flag
+
+- **Trigger:** A new row is inserted whose resolved phone number, party, and stone/line signature match an existing row (any status except `failed`).
+- **Prerequisites:** A phone number is resolved for the new row.
+- **Flow:** The match is computed independently of broker/date/exact wording, so it also catches the same demand arriving from a different file/import, not just an exact re-import. The row is created normally with its usual `draft`/`needs_info` status, plus a reference to the earlier matching row.
+- **Success:** The operator sees a visible "Possible duplicate" indicator and a clear reference to the earlier message; nothing is blocked or silently skipped.
+- **Failure/recovery:** The flag is informational and permanent - it is never auto-cleared. See `SEND-007` for how a flagged row is actually sent.
+- **Persistence:** `content_signature` and `duplicate_of_id` on the new `messages_log` row.
 
 ---
 
@@ -296,6 +324,15 @@ Safety rules that apply to every flow:
 - **Success:** Operator marks delivered, or explicitly confirms non-delivery and approves one retry.
 - **Failure/recovery:** Automatic retry is prohibited; sent/ordinary rows cannot use uncertain reconciliation.
 - **Persistence:** Uncertain status, reconciliation decision/note/time and optional one-time retry state.
+
+### SEND-007 — Confirm-to-send a possible duplicate
+
+- **Trigger:** Operator chooses **Send** or **Retry** on a row flagged by `DRAFT-004`.
+- **Prerequisites:** Row otherwise sendable (`draft` or `failed`, broker and phone known).
+- **Flow:** The first attempt is rejected with the duplicate reason instead of sending; the operator explicitly confirms, and only that confirmed, single-row attempt is allowed through.
+- **Success:** The confirmed row sends exactly like any other explicit send.
+- **Failure/recovery:** Bulk actions (**Send selected**, **Send all drafts**) and auto-send (`IMP-005`) never confirm on the operator's behalf - a flagged row in a bulk batch is skipped and reported, never sent silently.
+- **Persistence:** Same as `SEND-001`; the `duplicate_of_id` reference is not cleared by sending.
 
 ---
 
@@ -388,6 +425,46 @@ Safety rules that apply to every flow:
 
 ---
 
+## Configuration
+
+### CONFIG-001 — First-run Setup Wizard
+
+- **Trigger:** WhatsApp reaches `ready` for the first time and the installation has not completed onboarding.
+- **Prerequisites:** Authenticated dashboard; linked, ready WhatsApp.
+- **Flow:** A guided overlay walks the operator through column mapping, message template (with live preview) and backup folder/time, reusing the same components as Settings. Any step can be skipped with "Not now"/"Skip for now".
+- **Success:** Onboarding is marked complete; the operator can still revisit every step later from Settings.
+- **Failure/recovery:** Skipping at any step leaves the already-seeded default mapping/template in effect - the installation remains fully usable without completing the wizard. A failed save at the mapping/template step shows the same validation errors as Settings and does not advance.
+- **Persistence:** `setup_wizard_completed` setting; any mapping/template/backup changes made during the wizard persist exactly as they would from Settings.
+
+### CONFIG-002 — Edit column mapping
+
+- **Trigger:** Operator opens **Settings → Column Mapping**, edits fields and chooses **Save mapping** (or **Reset to default**).
+- **Prerequisites:** Authenticated dashboard.
+- **Flow:** Server validates exactly one broker-name field, at most one broker-phone/attachment field, at least one grouping field with exactly one primary grouping field, and unique field keys/column names before saving.
+- **Success:** The mapping is stored for this installation and used by every import from then on.
+- **Failure/recovery:** Invalid mappings are rejected with per-field error messages and are not saved; the previously saved mapping keeps governing imports until a valid one is saved.
+- **Persistence:** `field_mapping_config_v1` setting only. Does not alter previously imported `messages_log` rows - only future imports are affected.
+
+### CONFIG-003 — Edit message template with live preview
+
+- **Trigger:** Operator opens **Settings → Message Template**, edits the message/line-item/buyer-line templates and chooses **Save template** (or **Reset to default**).
+- **Prerequisites:** Authenticated dashboard; a valid column mapping already exists.
+- **Flow:** Every keystroke re-renders an illustrative preview from sample data via safe, non-executing placeholder substitution. Saving validates that every `{{placeholder}}` corresponds to a mapped field (or a reserved computed name) before persisting.
+- **Success:** The template is stored for this installation and used to render every message generated from then on.
+- **Failure/recovery:** A template referencing an unmapped or misspelled placeholder is rejected with the exact offending placeholder name; the previously saved template keeps governing message rendering.
+- **Persistence:** `message_template_config_v1` setting only. Does not alter previously imported `messages_log` rows - only future imports are affected.
+
+### CONFIG-004 — Auto-detect columns from a sample file
+
+- **Trigger:** Operator chooses **Auto-detect from a sample file** in the mapping editor (Settings or Setup Wizard) and selects one `.xlsx` file.
+- **Prerequisites:** Authenticated dashboard.
+- **Flow:** The server reads only the header row of the uploaded file (no data rows, no import, no queuing) and returns the column names found; the browser best-effort matches them against the mapping table's existing field labels and fills in "Your column name" where a match is found.
+- **Success:** The operator reviews (and corrects, if needed) the suggested column names, then saves the mapping as in `CONFIG-002`.
+- **Failure/recovery:** An invalid/unreadable/oversized file is rejected with the same operator-facing errors as workbook import; the mapping table is left unchanged.
+- **Persistence:** None - the uploaded file is discarded immediately after its header row is read.
+
+---
+
 ## Flow-to-test coverage
 
 | Test file | Primary registered flows |
@@ -395,16 +472,20 @@ Safety rules that apply to every flow:
 | `auth-recovery.test.js` | `AUTH-005` |
 | `session-store.test.js` | `AUTH-002`, `AUTH-004` |
 | `whatsapp-provider.test.js` | `WA-001` to `WA-006` |
-| `excel-import.test.js` | `IMP-002`, `IMP-003`, `DRAFT-002` |
+| `excel-import.test.js` | `IMP-002`, `IMP-003`, `DRAFT-002`, `CONFIG-002` (default mapping reproduces legacy output byte-for-byte) |
+| `message-config.test.js` | `CONFIG-002`, `CONFIG-003` (mapping/template validation and safe rendering) |
+| `config-routes.test.js` | `CONFIG-002`, `CONFIG-003`, `CONFIG-004` |
 | `import-files.test.js` | `IMP-001`, `IMP-004` |
 | `upload-multipart.test.js` | `IMP-001` |
-| `send-safety.test.js` | `SEND-001` to `SEND-003`, `SEND-005`, `SEND-006` |
+| `send-safety.test.js` | `SEND-001` to `SEND-003`, `SEND-005` to `SEND-007` |
 | `attachment-policy.test.js` | `SEND-004` |
+| `content-duplicate.test.js` | `DRAFT-004` |
+| `auto-send.test.js` | `IMP-005` |
 | `backup.test.js` | `BACKUP-001` to `BACKUP-005` |
 | `runtime-logger.test.js` | `UI-004` |
 | `installer-definition.test.js` | `LIFE-001`, `LIFE-002` |
 
-Browser verification additionally covers `AUTH-002`, `BACKUP-002`, `UI-001`, `UI-002` and `UI-003` on desktop and narrow viewports.
+Browser verification additionally covers `AUTH-002`, `BACKUP-002`, `UI-001`, `UI-002`, `UI-003`, `CONFIG-001` and `CONFIG-002`/`CONFIG-003` (Setup Wizard and Settings, including live preview) on desktop and narrow viewports.
 
 ## Change-control rule
 

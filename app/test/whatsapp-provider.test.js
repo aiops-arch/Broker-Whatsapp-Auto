@@ -235,6 +235,31 @@ test('a stuck direct QR refresh times out and falls back to a bounded client res
   assert.deepEqual(starts, [['qr']]);
 });
 
+test('a concurrent refreshCode() call is rejected instead of racing the first on the same page', async () => {
+  const provider = providerWithoutBrowser();
+  const { client } = fakeBrowserClient();
+  provider.status = 'qr';
+  provider.lastMethod = 'qr';
+  let releaseEvaluate;
+  const evaluateStarted = new Promise((resolveStarted) => {
+    client.pupPage.evaluate = async () => {
+      resolveStarted();
+      await new Promise((resolve) => { releaseEvaluate = resolve; });
+      client.emit('qr', 'fresh-qr');
+    };
+  });
+  provider._bindClientEvents(client, 'qr', provider._generation);
+  provider._startClient = async () => {};
+
+  const firstPromise = provider.refreshCode();
+  await evaluateStarted;
+  await assert.rejects(provider.refreshCode(), /already in progress/i);
+  releaseEvaluate();
+  await firstPromise;
+  assert.equal(provider.status, 'qr');
+  assert.equal(provider._refreshInProgress, false);
+});
+
 test('a slower stale QR encoding can never overwrite a newer QR', async () => {
   const provider = providerWithoutBrowser();
   const { client } = fakeBrowserClient();

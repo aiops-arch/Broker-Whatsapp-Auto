@@ -2,18 +2,18 @@
 
 Broker Demand Desk is a self-contained Windows application that converts a daily broker-demand Excel workbook into reviewed WhatsApp message drafts. It is designed for independent departmental installations: every PC keeps its own database, password, WhatsApp Web profile, backup schedule and configuration.
 
-> Messages are never sent automatically. An operator must review the generated drafts and explicitly choose **Send**, **Send selected**, or **Send all drafts**.
+> By default, messages are never sent automatically. An operator reviews the generated drafts and explicitly chooses **Send**, **Send selected**, or **Send all drafts**. An installation may opt in to automatic sending of complete, non-duplicate-flagged drafts from Settings — see [Duplicate detection and automatic sending](#duplicate-detection-and-automatic-sending).
 
 ## Current release
 
 | Item | Value |
 | --- | --- |
-| Version | `1.2.5` |
-| Installer | [`installer/output/BrokerDemandDesk-Setup-1.2.5.exe`](installer/output/BrokerDemandDesk-Setup-1.2.5.exe) |
+| Version | `1.4.0` |
+| Installer | [`installer/output/BrokerDemandDesk-Setup-1.2.5.exe`](installer/output/BrokerDemandDesk-Setup-1.2.5.exe) *(built from 1.2.5 — run `installer/build.ps1` to produce a signed 1.4.0 installer that includes the redesigned dashboard, configurable mapping/template, and duplicate detection/auto-send below)* |
 | SHA-256 | `1C90E738D174E92AE0B21318BDA223B8D5690A42641C1D24813B79A439E4FDF3` |
 | Platform | Windows 10/11 x64 |
 | Runtime | Bundled Node.js and Chromium; no separate Node, Docker or database installation required |
-| Test status | 58 automated tests passing, plus desktop/mobile browser verification |
+| Test status | 109 automated tests passing, plus desktop/mobile browser verification |
 
 The installer is not currently code-signed, so Windows can display an **Unknown Publisher** warning. Verify the SHA-256 checksum before distribution.
 
@@ -21,9 +21,11 @@ The installer is not currently code-signed, so Windows can display an **Unknown 
 
 - Imports exactly one `.xlsx` workbook at a time.
 - Validates the Excel/ZIP structure and required business columns before creating drafts.
-- Groups demand rows by broker and party.
+- Lets each installation map its own workbook's column names and choose which fields group, describe, or repeat within each message — see [Configurable column mapping and message template](#configurable-column-mapping-and-message-template).
+- Groups demand rows by broker and whichever fields are configured to identify a message (by default Party Name and Demand Date).
 - Maintains a local broker-to-phone-number directory.
-- Creates editable message drafts; nothing leaves the PC without operator approval.
+- Creates editable message drafts; nothing leaves the PC without operator approval, unless auto-send is explicitly opted in.
+- Flags a possible duplicate — the same party/stones reaching the same phone number from a different import — instead of silently skipping it or sending it twice; sending it still requires one explicit confirmation.
 - Sends text and approved local attachments through the linked WhatsApp Web account.
 - Tracks draft, sending, sent, delivered, read, failed and uncertain-delivery states.
 - Supports phone-code and QR linking, including switching and refresh controls.
@@ -31,6 +33,7 @@ The installer is not currently code-signed, so Windows can display an **Unknown 
 - Creates independent scheduled database backups using `year/month` folders.
 - Lets every PC choose its own daily backup time.
 - Includes safe restart/watchdog behavior and persistent browser login sessions.
+- Guides first-time setup with a Setup Wizard (column mapping, message template, backups), with a sidebar-organized dashboard (Dashboard, Messages, Brokers, Backups, Settings) for everyday use.
 
 ## End-to-end product flow
 
@@ -61,11 +64,12 @@ Every supported operational flow is assigned a stable identifier and documented 
 | Installation and lifecycle | `LIFE-001` to `LIFE-004` |
 | Authentication and recovery | `AUTH-001` to `AUTH-005` |
 | WhatsApp connection | `WA-001` to `WA-006` |
-| Workbook import | `IMP-001` to `IMP-004` |
-| Broker and draft management | `DRAFT-001` to `DRAFT-003` |
-| Sending and delivery safety | `SEND-001` to `SEND-006` |
+| Workbook import | `IMP-001` to `IMP-006` |
+| Broker and draft management | `DRAFT-001` to `DRAFT-004` |
+| Sending and delivery safety | `SEND-001` to `SEND-007` |
 | Backups | `BACKUP-001` to `BACKUP-005` |
 | Interface and diagnostics | `UI-001` to `UI-004` |
+| Configuration | `CONFIG-001` to `CONFIG-004` |
 
 The registry is the source of truth for acceptance testing and future changes. A feature is not considered complete until its flow, failure behavior and persistence boundary are represented there.
 
@@ -124,7 +128,7 @@ The uninstaller intentionally preserves operational data folders to avoid accide
 
 ### Required workbook headers
 
-The importer expects these columns:
+By default the importer expects these columns, which reproduce the application's original behavior:
 
 ```text
 Invoice No.
@@ -141,7 +145,37 @@ Buyer Name
 Attachment
 ```
 
+Every installation can map its own workbook's column names instead — see [Configurable column mapping and message template](#configurable-column-mapping-and-message-template).
+
 Legacy `.xls`, renamed non-Excel files, malformed workbooks, header-only files and rows missing essential business values are rejected safely. Failed inputs are retained with a readable error sidecar when possible.
+
+## Configurable column mapping and message template
+
+Broker Demand Desk no longer requires an exact fixed workbook layout or wording. From **Settings** (or the first-run **Setup Wizard**), an operator can:
+
+- **Map columns**: assign each of the workbook's own column names to a field role — broker name, broker phone, one or more grouping fields (which rows become one message; by default Party Name and Demand Date), header info shown once per message (like Buyer Name), line items that repeat once per row (like StoneId/Color/Clarity/CTS), an attachment filename column, or mark a column as unused. Exactly one broker-name field is always required, since sending a message always needs someone to send it to.
+- **Auto-detect columns**: upload a sample workbook to read its header row and pre-fill the mapping, instead of typing column names by hand.
+- **Customize the message**: edit the message template and the repeating line-item template using `{{placeholders}}` that match the mapped fields, with a live preview rendered from sample data as you type.
+- **Reset to default**: return either the column mapping or the message template to the application's original defaults at any time.
+
+Two safety guarantees:
+
+- **Existing installations are unaffected until changed.** The default mapping and template reproduce the original fixed behavior exactly; nothing changes for an installation that never opens Settings.
+- **Changes are forward-only.** Editing the mapping or template only affects workbooks imported afterward — it never rewrites messages already generated from earlier imports.
+
+See the [Feature Flow Registry](docs/FEATURE_FLOWS.md) (`CONFIG-001`–`CONFIG-004`) for the full trigger/failure/persistence behavior of these flows.
+
+## Duplicate detection and automatic sending
+
+Every imported row is checked against every other row already on file (sent, in progress, or still a pending draft) for the same **resolved phone number**, the same **party**, and the same **set of stones/line items** — regardless of wording, the date, or which import/file it came from.
+
+- **A match is flagged, never silently skipped and never hard-blocked.** The row is created normally with a **Possible duplicate** indicator and a reference to the earlier message. It cannot be selected for **Send selected**/**Send all drafts**; sending it individually asks for one explicit confirmation first.
+- **A failed send is never treated as a duplicate source** — it didn't actually deliver anything.
+- This is broader than the existing exact re-import protection: uploading the identical workbook twice is still silently deduplicated (and now reported in a toast, e.g. "8 new, 3 already imported"); this flag additionally catches the same real-world demand arriving from a *different* file.
+
+**Automatic sending** is an opt-in toggle in Settings, off by default. When enabled, a row sends immediately after import — no click needed — only if it is complete (broker and phone known), carries no possible-duplicate flag, and WhatsApp is connected. Rows needing information, or flagged as a possible duplicate, always wait for manual review, with or without this toggle. Turning it on never retroactively sends drafts already sitting in the queue — only rows from imports that happen while it is on.
+
+See the [Feature Flow Registry](docs/FEATURE_FLOWS.md) (`DRAFT-004`, `SEND-007`, `IMP-005`, `IMP-006`) for the full behavior.
 
 ## Backups
 
@@ -176,6 +210,7 @@ The native Windows folder chooser is owned by the application and opens in the f
 - A sent row cannot be sent again.
 - If the app stops after handing a message to WhatsApp but before confirmation, the row becomes `send_uncertain`.
 - `send_uncertain` is never retried automatically. The operator must verify the conversation in WhatsApp and explicitly reconcile it.
+- A row flagged as a possible duplicate requires one explicit confirmation before it sends; bulk actions and auto-send always skip a flagged row instead of confirming on the operator's behalf.
 - Malformed WhatsApp acknowledgement events and known transient Puppeteer navigation races are contained so they cannot restart the entire application.
 
 ## Development

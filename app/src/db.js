@@ -1,5 +1,6 @@
 const path = require('node:path');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 
 // The override exists for isolated automated tests and portable deployments;
@@ -58,6 +59,10 @@ async function init() {
   ensureColumn('send_started_at', 'TEXT');
   ensureColumn('reconciled_at', 'TEXT');
   ensureColumn('reconciliation_note', 'TEXT');
+  ensureColumn('content_signature', 'TEXT');
+  ensureColumn('duplicate_of_id', 'INTEGER');
+  ensureColumn('auto_sent', 'INTEGER');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_messages_content_signature ON messages_log(content_signature);');
 
   // If the process exited after handing a message to WhatsApp but before the
   // final DB commit, delivery is unknowable. Keep that row locked instead of
@@ -75,6 +80,22 @@ function ensureColumn(name, type) {
   if (!columns.some((c) => c.name === name)) {
     db.exec(`ALTER TABLE messages_log ADD COLUMN ${name} ${type};`);
   }
+}
+
+function normalizePhoneDigits(phone) {
+  return String(phone || '').replace(/\D/g, '');
+}
+
+// Deliberately independent of demand_date/broker/dedup_key so it can catch a
+// duplicate across two different imports/files - the thing dedup_key cannot
+// do, since dedup_key intentionally bakes in the exact broker+date combo.
+function computeContentSignature(phone, partyName, dedupComponentSignature) {
+  const parts = [
+    normalizePhoneDigits(phone),
+    String(partyName || '').trim().toLowerCase(),
+    String(dedupComponentSignature || ''),
+  ];
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
 }
 
 function computeStatus(brokerName, phone) {
@@ -118,14 +139,42 @@ async function insertMessage(row) {
   const baseState = computeStatus(row.brokerName, row.phone);
   const status = row.validationError ? 'needs_info' : baseState.status;
   const error = row.validationError || baseState.error;
-  const info = db.prepare(`
-    INSERT INTO messages_log
-      (dedup_key, demand_date, broker_name, party_name, buyer_name, phone, message, original_message, stone_count, attachment_path, status, error, source_file)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    row.dedupKey, row.demandDate, row.brokerName, row.partyName, row.buyerName || null,
-    row.phone || null, row.message, row.message, row.stoneCount, row.attachmentPath || null, status, error, row.sourceFile
-  );
+
+  // A cross-import "possible duplicate" check - broader than dedup_key, which
+  // only catches an exact re-import (same broker+party+date+stones). This
+  // catches the same content (party+stones) reaching the same phone number
+  // from a DIFFERENT import/file, even with different wording or a different
+  // date. Only meaningful when a phone is actually known; a failed send never
+  // counts as a duplicate source since it didn't actually deliver anything.
+  // The lookup-then-insert below is one synchronous, uninterrupted sequence
+  // (node:sqlite's DatabaseSync has no await between them) - race-free for
+  // the same reason claimMessageForSend's compare-and-swap is.
+  const hasPhone = Boolean(row.phone && String(row.phone).trim());
+  const signature = hasPhone ? computeContentSignature(row.phone, row.partyName, row.dedupComponentSignature) : null;
+  const match = signature
+    ? db.prepare(`SELECT id FROM messages_log WHERE content_signature = ? AND status != 'failed' ORDER BY id ASC LIMIT 1`).get(signature)
+    : null;
+  const duplicateOfId = match ? match.id : null;
+
+  let info;
+  try {
+    info = db.prepare(`
+      INSERT INTO messages_log
+        (dedup_key, demand_date, broker_name, party_name, buyer_name, phone, message, original_message, stone_count, attachment_path, status, error, source_file, content_signature, duplicate_of_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.dedupKey, row.demandDate, row.brokerName, row.partyName, row.buyerName || null,
+      row.phone || null, row.message, row.message, row.stoneCount, row.attachmentPath || null, status, error, row.sourceFile,
+      signature, duplicateOfId,
+    );
+  } catch (dbError) {
+    if (String(dbError?.message || '').includes('UNIQUE constraint failed') && String(dbError.message).includes('dedup_key')) {
+      const tagged = new Error('This exact demand has already been imported.');
+      tagged.code = 'DUPLICATE_DEDUP_KEY';
+      throw tagged;
+    }
+    throw dbError;
+  }
   return Number(info.lastInsertRowid);
 }
 
@@ -167,13 +216,13 @@ async function claimMessageForSend(id) {
   return getMessage(id);
 }
 
-async function markSent(id, waMessageId) {
+async function markSent(id, waMessageId, options = {}) {
   const info = db.prepare(`
     UPDATE messages_log
     SET status = 'sent', error = NULL, sent_at = datetime('now'), send_started_at = NULL,
-        wa_message_id = ?, delivery_status = 'sent'
+        wa_message_id = ?, delivery_status = 'sent', auto_sent = ?
     WHERE id = ? AND status = 'sending'
-  `).run(waMessageId || null, id);
+  `).run(waMessageId || null, options.auto === true ? 1 : 0, id);
   return Number(info.changes) === 1;
 }
 
@@ -275,6 +324,7 @@ async function counts() {
 
 module.exports = {
   db,
+  DATA_DIR: dbDir,
   init,
   upsertBroker,
   getBrokerPhone,

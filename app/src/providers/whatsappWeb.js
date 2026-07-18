@@ -92,6 +92,7 @@ class WhatsAppWebProvider extends EventEmitter {
     this._now = () => Date.now();
     this._fsPromises = fs.promises;
     this._resetInProgress = false;
+    this._refreshInProgress = false;
     this.authDataPath = AUTH_DATA_PATH;
     this.authSessionPath = path.join(this.authDataPath, 'session');
 
@@ -647,33 +648,43 @@ class WhatsAppWebProvider extends EventEmitter {
   async refreshCode() {
     if (this.isReady()) throw new Error('WhatsApp is already connected; there is no setup code to refresh.');
     if (this._resetInProgress) throw new Error('WhatsApp setup is being reset. Wait a moment and try again.');
-
-    if (this.lastMethod === 'phone' && this.lastPhoneNumber) {
+    // Unlike beginSetup/resetSetup/disconnect (which all bump _generation or
+    // check _resetInProgress before touching anything async), the "direct"
+    // fast paths below operate on the existing live client with no lock of
+    // their own - a double-click could otherwise run two refreshes on the
+    // same Puppeteer page concurrently.
+    if (this._refreshInProgress) throw new Error('A code refresh is already in progress. Wait a moment and try again.');
+    this._refreshInProgress = true;
+    try {
+      if (this.lastMethod === 'phone' && this.lastPhoneNumber) {
+        const client = this.client;
+        const generation = this._generation;
+        if (this._hasHealthySetupClient(client)) {
+          try {
+            await this._refreshPhoneDirect(client, generation, this.lastPhoneNumber);
+            return;
+          } catch (err) {
+            console.error('[whatsapp_web] direct phone-code refresh failed; restarting the setup client:', describeError(err));
+          }
+        }
+        await this._startClient('phone', this.lastPhoneNumber);
+        return;
+      }
+      this.lastMethod = 'qr';
       const client = this.client;
       const generation = this._generation;
-      if (this._hasHealthySetupClient(client)) {
+      if (this._hasHealthySetupClient(client) && this.status === 'qr') {
         try {
-          await this._refreshPhoneDirect(client, generation, this.lastPhoneNumber);
+          await this._refreshQrDirect(client, generation);
           return;
         } catch (err) {
-          console.error('[whatsapp_web] direct phone-code refresh failed; restarting the setup client:', describeError(err));
+          console.error('[whatsapp_web] direct QR refresh failed; restarting the setup client:', describeError(err));
         }
       }
-      await this._startClient('phone', this.lastPhoneNumber);
-      return;
+      await this._startClient('qr');
+    } finally {
+      this._refreshInProgress = false;
     }
-    this.lastMethod = 'qr';
-    const client = this.client;
-    const generation = this._generation;
-    if (this._hasHealthySetupClient(client) && this.status === 'qr') {
-      try {
-        await this._refreshQrDirect(client, generation);
-        return;
-      } catch (err) {
-        console.error('[whatsapp_web] direct QR refresh failed; restarting the setup client:', describeError(err));
-      }
-    }
-    await this._startClient('qr');
   }
 
   // Fully unlinks the connected number (properly logs out on WhatsApp's side

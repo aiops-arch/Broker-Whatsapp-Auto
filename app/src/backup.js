@@ -3,6 +3,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { backup: sqliteBackup } = require('node:sqlite');
+const db = require('./db');
+
+const APP_INSTALL_DIR = path.resolve(__dirname, '..');
+
+// True when `child` is `parent` itself or nested inside it.
+function isPathContained(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
 
 const BACKUP_ROOT_SETTING = 'backup_root';
 const BACKUP_LAST_SUCCESS_SETTING = 'backup_last_success';
@@ -116,7 +125,23 @@ function normalizeBackupRoot(input) {
     error.code = 'INVALID_BACKUP_FOLDER';
     throw error;
   }
-  return path.normalize(path.resolve(value));
+  const resolved = path.normalize(path.resolve(value));
+
+  // A backup destination inside the app's own data or install directory
+  // would be destroyed right alongside the primary data it's meant to
+  // protect (disk failure, accidental folder deletion, uninstall), silently
+  // defeating the whole point of an "independent" backup.
+  const dataDir = path.resolve(db.DATA_DIR);
+  const unsafe = isPathContained(dataDir, resolved)
+    || isPathContained(resolved, dataDir)
+    || isPathContained(APP_INSTALL_DIR, resolved);
+  if (unsafe) {
+    const error = new Error('Choose a backup folder outside this application\'s installation and data folders, so backups stay independent from the data they protect.');
+    error.code = 'INVALID_BACKUP_FOLDER';
+    throw error;
+  }
+
+  return resolved;
 }
 
 function validateWritableDirectory(input, { fsApi = fs } = {}) {

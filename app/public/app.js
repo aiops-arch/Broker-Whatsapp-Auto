@@ -5,10 +5,11 @@ let lastLogs = [];
 let lastBrokers = [];
 let waReady = false;
 const selectedIds = new Set();
-let backupPromptHandled = false;
 let backupRefreshInFlight = null;
 let lastBackupStatus = null;
-let backupModalReturnFocus = null;
+let wizardPromptHandled = false;
+let wizardModalReturnFocus = null;
+let wizardStep = 'welcome';
 
 // ---------- Theme ----------
 const THEME_KEY = 'broker-desk-theme';
@@ -26,6 +27,18 @@ document.getElementById('themeToggle').addEventListener('click', () => {
   localStorage.setItem(THEME_KEY, next);
 });
 
+// ---------- Sidebar navigation ----------
+const VIEW_STORAGE_KEY = 'broker-desk-view';
+function showView(name) {
+  document.querySelectorAll('.nav-item[data-view]').forEach((btn) => btn.classList.toggle('active', btn.dataset.view === name));
+  document.querySelectorAll('.view[data-view]').forEach((section) => section.classList.toggle('active', section.dataset.view === name));
+  try { localStorage.setItem(VIEW_STORAGE_KEY, name); } catch { /* storage unavailable - view just won't persist */ }
+}
+document.querySelectorAll('.nav-item[data-view]').forEach((btn) => {
+  btn.addEventListener('click', () => showView(btn.dataset.view));
+});
+showView(localStorage.getItem(VIEW_STORAGE_KEY) || 'dashboard');
+
 // ---------- Toasts ----------
 const TOAST_ICON = { success: '✓', error: '✕', info: 'ℹ' };
 function showToast(message, type = 'info') {
@@ -42,6 +55,22 @@ function showToast(message, type = 'info') {
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// A small shared fetch helper for the newer Settings/Setup Wizard code only -
+// the rest of the app keeps its existing repeated inline fetch() pattern to
+// avoid touching working call sites for this change.
+async function apiFetch(path, options = {}) {
+  const res = await fetch(path, options);
+  if (res.status === 401) { location.reload(); throw new Error('Session expired'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const error = new Error(data.error || 'Request failed.');
+    error.code = data.code;
+    error.fieldErrors = data.fieldErrors;
+    throw error;
+  }
+  return data;
 }
 
 const STATUS_LABEL = {
@@ -535,7 +564,7 @@ function renderBackupUnavailable(message = 'Backup status is unavailable. The lo
   document.getElementById('runBackupBtn').disabled = true;
 }
 
-async function refreshBackupStatus({ allowPrompt = true } = {}) {
+async function refreshBackupStatus() {
   if (backupRefreshInFlight) return backupRefreshInFlight;
   backupRefreshInFlight = (async () => {
     try {
@@ -545,7 +574,6 @@ async function refreshBackupStatus({ allowPrompt = true } = {}) {
       if (!res.ok) throw new Error(data.error || 'Backup status could not be loaded.');
       const status = normaliseBackupStatus(data);
       renderBackupStatus(status);
-      if (allowPrompt && !backupPromptHandled && !status.configured) showBackupSetupModal();
       return status;
     } catch (err) {
       renderBackupUnavailable(err.message);
@@ -557,59 +585,32 @@ async function refreshBackupStatus({ allowPrompt = true } = {}) {
   return backupRefreshInFlight;
 }
 
-function showBackupSetupModal() {
-  backupPromptHandled = true;
-  const overlay = document.getElementById('backupSetupOverlay');
-  if (overlay.classList.contains('open')) return;
-  backupModalReturnFocus = document.activeElement;
-  document.getElementById('backupSetupError').hidden = true;
-  overlay.classList.add('open');
-  overlay.setAttribute('aria-hidden', 'false');
-  setTimeout(() => document.getElementById('backupSetupChoose').focus(), 0);
-}
-
-function hideBackupSetupModal() {
-  const overlay = document.getElementById('backupSetupOverlay');
-  if (!overlay.classList.contains('open')) return;
-  overlay.classList.remove('open');
-  overlay.setAttribute('aria-hidden', 'true');
-  if (backupModalReturnFocus && typeof backupModalReturnFocus.focus === 'function') backupModalReturnFocus.focus();
-  backupModalReturnFocus = null;
-}
-
-function setBackupSetupError(message) {
-  const error = document.getElementById('backupSetupError');
-  error.textContent = message;
-  error.hidden = !message;
-}
-
-async function chooseBackupFolder(button, fromSetupModal = false) {
+// Shared by the Backups view's own "Choose folder" button and the Setup
+// Wizard's backup step - only the hint element and success/error handling
+// differ between those two callers.
+async function chooseBackupFolder(button, options = {}) {
+  const {
+    hintId = 'backupChooserHint',
+    onError = (message) => showToast(message, 'error'),
+    onSuccess = () => showToast('Backup folder saved for this department', 'success'),
+  } = options;
   const idleLabel = button.textContent;
-  const chooserHint = document.getElementById(fromSetupModal ? 'backupSetupChooserHint' : 'backupChooserHint');
+  const chooserHint = document.getElementById(hintId);
   button.disabled = true;
   button.innerHTML = '<span class="spinner"></span> Opening…';
-  chooserHint.hidden = false;
-  if (fromSetupModal) setBackupSetupError('');
+  if (chooserHint) chooserHint.hidden = false;
   try {
     const res = await fetch('/api/backup/choose-folder', { method: 'POST' });
     if (res.status === 401) { location.reload(); return; }
-    if (res.status === 204) {
-      if (fromSetupModal) setBackupSetupError('No folder was selected. You can try again or choose Not now.');
-      else showToast('No folder selected. The backup setting was not changed.', 'info');
-      return;
-    }
+    if (res.status === 204) { onError('No folder was selected. You can try again.'); return; }
     const data = await res.json().catch(() => ({}));
-    if (data.cancelled) {
-      if (fromSetupModal) setBackupSetupError('No folder was selected. You can try again or choose Not now.');
-      else showToast('No folder selected. The backup setting was not changed.', 'info');
-      return;
-    }
+    if (data.cancelled) { onError('No folder was selected. You can try again.'); return; }
     if (!res.ok) {
       if (data.status && typeof data.status === 'object') {
         const savedStatus = normaliseBackupStatus(data.status);
         renderBackupStatus(savedStatus);
         if (savedStatus.configured) {
-          hideBackupSetupModal();
+          onSuccess();
           showToast(data.error || 'Folder saved, but the first backup needs attention.', 'error');
           return;
         }
@@ -622,16 +623,14 @@ async function chooseBackupFolder(button, fromSetupModal = false) {
       renderBackupStatus(status);
     } else {
       if (backupRefreshInFlight) await backupRefreshInFlight;
-      status = await refreshBackupStatus({ allowPrompt: false });
+      status = await refreshBackupStatus();
     }
     if (!status || !status.configured) throw new Error('The backup folder was not saved. Please try again.');
-    hideBackupSetupModal();
-    showToast('Backup folder saved for this department', 'success');
+    onSuccess();
   } catch (err) {
-    if (fromSetupModal) setBackupSetupError(err.message || 'The backup folder could not be selected.');
-    else showToast(err.message || 'The backup folder could not be selected.', 'error');
+    onError(err.message || 'The backup folder could not be selected.');
   } finally {
-    chooserHint.hidden = true;
+    if (chooserHint) chooserHint.hidden = true;
     button.disabled = false;
     button.textContent = button.id === 'chooseBackupFolderBtn'
       ? ((lastBackupStatus && lastBackupStatus.configured) ? 'Change folder' : 'Choose folder')
@@ -641,7 +640,8 @@ async function chooseBackupFolder(button, fromSetupModal = false) {
 
 async function runBackupNow() {
   if (!lastBackupStatus || !lastBackupStatus.configured) {
-    showBackupSetupModal();
+    showView('backups');
+    showToast('Choose a backup folder first.', 'info');
     return;
   }
   const button = document.getElementById('runBackupBtn');
@@ -656,7 +656,7 @@ async function runBackupNow() {
   } catch (err) {
     showToast(err.message || 'The backup could not be completed.', 'error');
   } finally {
-    await refreshBackupStatus({ allowPrompt: false });
+    await refreshBackupStatus();
     button.innerHTML = '';
     button.textContent = (lastBackupStatus && lastBackupStatus.running) ? 'Backing up…' : 'Back up now';
     button.disabled = !(lastBackupStatus && lastBackupStatus.configured) || Boolean(lastBackupStatus && lastBackupStatus.running);
@@ -692,32 +692,6 @@ async function saveBackupTime() {
 document.getElementById('chooseBackupFolderBtn').addEventListener('click', (event) => chooseBackupFolder(event.currentTarget));
 document.getElementById('runBackupBtn').addEventListener('click', runBackupNow);
 document.getElementById('saveBackupTimeBtn').addEventListener('click', saveBackupTime);
-document.getElementById('backupSetupChoose').addEventListener('click', (event) => chooseBackupFolder(event.currentTarget, true));
-document.getElementById('backupSetupLater').addEventListener('click', hideBackupSetupModal);
-document.getElementById('backupSetupClose').addEventListener('click', hideBackupSetupModal);
-document.getElementById('backupSetupOverlay').addEventListener('click', (event) => {
-  if (event.target.id === 'backupSetupOverlay') hideBackupSetupModal();
-});
-document.addEventListener('keydown', (event) => {
-  const overlay = document.getElementById('backupSetupOverlay');
-  if (!overlay.classList.contains('open')) return;
-  if (event.key === 'Escape') {
-    hideBackupSetupModal();
-    return;
-  }
-  if (event.key !== 'Tab') return;
-  const focusable = [...overlay.querySelectorAll('button:not([disabled])')];
-  if (!focusable.length) return;
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus();
-  }
-});
 
 // ---------- Status / counts ----------
 async function refreshStatus() {
@@ -818,6 +792,12 @@ async function refreshStatus() {
   document.getElementById('cDraft').textContent = draft;
   document.getElementById('cNeedsInfo').textContent = needsInfo;
   document.getElementById('cFailed').textContent = attention;
+
+  const navBadge = document.getElementById('navAttentionBadge');
+  if (navBadge) {
+    navBadge.hidden = attention === 0;
+    navBadge.textContent = attention;
+  }
 
   const total = sent + draft + needsInfo + failed + sending + uncertain;
   const pct = (n) => (total ? (n / total) * 100 : 0);
@@ -984,12 +964,20 @@ function renderLogs() {
   tbody.innerHTML = rows
     .map((r) => {
       const disabledAttr = waReady ? '' : 'disabled title="Connect WhatsApp before sending"';
-      const canSelect = SENDABLE_STATUSES.has(r.status);
+      // A possible-duplicate row is only ever sendable through its own
+      // Send/Retry button (which prompts an explicit confirm) - never as
+      // part of a bulk selection.
+      const canSelect = SENDABLE_STATUSES.has(r.status) && !r.duplicate_of_id;
       const note = r.error || r.reconciliation_note || '';
       const actions = [`<button class="view-link" data-view="${r.id}" type="button">View</button>`];
       if (EDITABLE_STATUSES.has(r.status)) actions.push(`<button class="btn btn-sm" data-edit="${r.id}" type="button">Edit</button>`);
       if (r.status === 'draft') actions.push(`<button class="btn btn-sm btn-primary" data-send="${r.id}" type="button" ${disabledAttr}>Send</button>`);
       if (r.status === 'failed') actions.push(`<button class="btn btn-sm btn-gold" data-retry="${r.id}" type="button" ${disabledAttr}>Retry</button>`);
+
+      const duplicateTag = r.duplicate_of_id
+        ? ` <span class="tag duplicate-warning" title="Same party/stones already sent or queued to this number as message #${r.duplicate_of_id}">Possible duplicate</span>`
+        : '';
+      const autoTag = r.auto_sent ? ' <span class="tag auto-sent" title="Sent automatically by auto-send">Auto</span>' : '';
 
       return `
       <tr class="status-cell-row ${r.status}" data-row-id="${r.id}">
@@ -1001,7 +989,7 @@ function renderLogs() {
         <td title="${escapeHtml(r.buyer_name || '')}">${escapeHtml(r.buyer_name || '—')}</td>
         <td class="phone-cell">${escapeHtml(r.phone || '—')}</td>
         <td class="tabular">${r.stone_count}</td>
-        <td><span class="tag ${r.status}">${STATUS_LABEL[r.status] || r.status}</span>${deliveryBadge(r)}</td>
+        <td><span class="tag ${r.status}">${STATUS_LABEL[r.status] || r.status}</span>${deliveryBadge(r)}${autoTag}${duplicateTag}</td>
         <td class="${r.error ? 'error-text' : 'note-text'}">${escapeHtml(note)}</td>
         <td class="row-actions">${actions.join('')}</td>
       </tr>
@@ -1033,12 +1021,37 @@ function renderLogs() {
   updateBulkBar();
 }
 
+async function postSend(id, path, confirmDuplicate) {
+  const options = { method: 'POST' };
+  if (confirmDuplicate) {
+    options.headers = { 'Content-Type': 'application/json' };
+    options.body = JSON.stringify({ confirmDuplicate: true });
+  }
+  const res = await fetch(`/api/logs/${id}${path}`, options);
+  const data = await res.json().catch(() => ({}));
+  return { res, data };
+}
+
 async function runSend(btn, id, path, successLabel) {
   btn.disabled = true;
   const original = btn.textContent;
   btn.innerHTML = '<span class="spinner"></span>';
-  const res = await fetch(`/api/logs/${id}${path}`, { method: 'POST' });
-  const data = await res.json();
+  let { res, data } = await postSend(id, path, false);
+
+  // A possible-duplicate row is never sent silently - one extra explicit
+  // confirmation is required before retrying the same request.
+  if (res.status === 409 && data.code === 'POSSIBLE_DUPLICATE') {
+    const confirmed = confirm(
+      `${data.error}\n\nSend it anyway? Only do this if you've checked it is not actually a repeat.`,
+    );
+    if (!confirmed) {
+      btn.disabled = false;
+      btn.textContent = original;
+      return;
+    }
+    ({ res, data } = await postSend(id, path, true));
+  }
+
   if (!res.ok) showToast(data.error || 'Send failed', 'error');
   else showToast(`${successLabel} to the broker on WhatsApp`, 'success');
   refreshLogs();
@@ -1065,7 +1078,7 @@ document.getElementById('exportBtn').addEventListener('click', () => {
 
 document.getElementById('selectAllCheckbox').addEventListener('change', (e) => {
   const term = logSearchTerm.toLowerCase();
-  const visible = lastLogs.filter((r) => SENDABLE_STATUSES.has(r.status) && (
+  const visible = lastLogs.filter((r) => SENDABLE_STATUSES.has(r.status) && !r.duplicate_of_id && (
     !term
     || r.broker_name.toLowerCase().includes(term)
     || r.party_name.toLowerCase().includes(term)
@@ -1076,10 +1089,22 @@ document.getElementById('selectAllCheckbox').addEventListener('change', (e) => {
 });
 
 document.getElementById('selectAllBtn').addEventListener('click', () => {
-  lastLogs.filter((r) => r.status === 'draft').forEach((r) => selectedIds.add(r.id));
+  lastLogs.filter((r) => r.status === 'draft' && !r.duplicate_of_id).forEach((r) => selectedIds.add(r.id));
   renderLogs();
   showToast(`Selected ${selectedIds.size} draft(s) ready to send`, 'success');
 });
+
+// Bulk sends never bypass the duplicate-confirmation gate - a flagged row
+// always comes back with `duplicate: true` instead of being sent silently.
+function summarizeBulkSendResults(results) {
+  const okCount = results.filter((r) => r.ok).length;
+  const duplicateCount = results.filter((r) => !r.ok && r.duplicate).length;
+  const otherFailCount = results.length - okCount - duplicateCount;
+  const parts = [`${okCount} sent`];
+  if (duplicateCount) parts.push(`${duplicateCount} skipped (possible duplicate - send individually to confirm)`);
+  if (otherFailCount) parts.push(`${otherFailCount} failed`);
+  return { message: parts.join(', '), type: (duplicateCount || otherFailCount) ? 'error' : 'success' };
+}
 
 document.getElementById('sendSelectedBtn').addEventListener('click', async () => {
   const ids = [...selectedIds];
@@ -1095,9 +1120,8 @@ document.getElementById('sendSelectedBtn').addEventListener('click', async () =>
       body: JSON.stringify({ ids }),
     });
     const data = await res.json();
-    const okCount = (data.results || []).filter((r) => r.ok).length;
-    const failCount = (data.results || []).length - okCount;
-    showToast(`${okCount} sent${failCount ? `, ${failCount} failed` : ''}`, failCount ? 'error' : 'success');
+    const { message, type } = summarizeBulkSendResults(data.results || []);
+    showToast(message, type);
     selectedIds.clear();
   } finally {
     // Restore the button's original markup (its #selectedCount span) before
@@ -1119,10 +1143,11 @@ document.getElementById('sendAllDraftsBtn').addEventListener('click', async () =
   const data = await res.json();
   btn.disabled = false;
   btn.textContent = originalText;
-  const okCount = (data.results || []).filter((r) => r.ok).length;
-  const failCount = (data.results || []).length - okCount;
   if (!data.results || !data.results.length) showToast('No drafts ready to send', 'info');
-  else showToast(`${okCount} sent${failCount ? `, ${failCount} failed` : ''}`, failCount ? 'error' : 'success');
+  else {
+    const { message, type } = summarizeBulkSendResults(data.results);
+    showToast(message, type);
+  }
   refreshLogs();
   refreshStatus();
 });
@@ -1148,6 +1173,7 @@ function openViewModal(id) {
     <div class="modal-meta">${metaBlock(row)}</div>
     <div class="message-note">${escapeHtml(row.original_message || row.message)}</div>
     ${edited ? `<p class="field-hint" style="margin-top:10px">This draft has been edited from the original — see "Edit" for the current version that will actually be sent.</p>` : ''}
+    ${row.duplicate_of_id ? `<p class="field-hint" style="margin-top:10px"><strong>Possible duplicate:</strong> the same party/stones already went to this phone number as message #${row.duplicate_of_id}. Sending this one will ask you to confirm first.</p>` : ''}
     ${row.reconciliation_note ? `<p class="field-hint" style="margin-top:10px"><strong>Verification record:</strong> ${escapeHtml(row.reconciliation_note)}</p>` : ''}
     ${row.status === 'send_uncertain' ? `
       <div class="uncertain-panel" role="alert">
@@ -1262,7 +1288,10 @@ document.getElementById('modalClose').addEventListener('click', closeModal);
 document.getElementById('modalBackdrop').addEventListener('click', (e) => {
   if (e.target.id === 'modalBackdrop') closeModal();
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('modalBackdrop').classList.contains('open')) closeModal();
+});
 
 // ---------- Upload ----------
 const uploadInput = document.getElementById('fileInput');
@@ -1313,6 +1342,680 @@ document.getElementById('uploadBtn').addEventListener('click', async () => {
   }
 });
 
+// ---------- Settings: column mapping ----------
+const MAPPING_ROLE_OPTIONS = [
+  ['broker_name', 'Broker name'],
+  ['broker_phone', 'Broker phone'],
+  ['group', 'Group (identifies the message)'],
+  ['header', 'Header info (once per message)'],
+  ['line', 'Line item (repeats per row)'],
+  ['attachment', 'Attachment file'],
+  ['ignore', 'Not used'],
+];
+
+function slugToKey(label, existingKeys) {
+  let base = String(label || 'field').trim().replace(/[^a-zA-Z0-9]+(.)?/g, (_, c) => (c ? c.toUpperCase() : ''));
+  if (!base || !/^[a-zA-Z_]/.test(base)) base = `f${base}`;
+  let key = base;
+  let n = 1;
+  while (existingKeys.has(key)) { n += 1; key = `${base}${n}`; }
+  return key;
+}
+
+function mappingRowHtml(field) {
+  return `
+    <tr>
+      <td>
+        <input type="text" class="map-label" value="${escapeHtml(field.label || '')}" placeholder="Label" />
+        <input type="hidden" class="map-key" value="${escapeHtml(field.key || '')}" />
+      </td>
+      <td><input type="text" class="map-source" value="${escapeHtml(field.sourceHeader || '')}" placeholder="Column name in your workbook" /></td>
+      <td>
+        <select class="map-role">
+          ${MAPPING_ROLE_OPTIONS.map(([value, label]) => `<option value="${value}" ${field.role === value ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}
+        </select>
+      </td>
+      <td>
+        <div class="mapping-role-flags">
+          <label title="The main field the message is grouped by, e.g. Party Name"><input type="checkbox" class="map-primary" ${field.primaryGroupField ? 'checked' : ''} /> Primary</label>
+          <label title="The demand date column"><input type="checkbox" class="map-date" ${field.dateField ? 'checked' : ''} /> Date</label>
+          <label title="Shown only when a buyer is present"><input type="checkbox" class="map-buyer" ${field.buyerField ? 'checked' : ''} /> Buyer</label>
+          <label title="Format numbers like 1.20"><input type="checkbox" class="map-decimal" ${field.format === 'decimal2' ? 'checked' : ''} /> 2-decimal</label>
+          <label title="Every row must have a value"><input type="checkbox" class="map-required-row" ${field.requiredRow ? 'checked' : ''} /> Required</label>
+          <label title="This column may be missing from the workbook"><input type="checkbox" class="map-optional" ${!field.requiredHeader ? 'checked' : ''} /> Optional column</label>
+        </div>
+      </td>
+      <td><button class="btn btn-sm btn-danger-ghost map-remove" type="button">Remove</button></td>
+    </tr>
+  `;
+}
+
+function renderMappingRows(tbody, fields) {
+  tbody.innerHTML = fields.map(mappingRowHtml).join('');
+  tbody.querySelectorAll('.map-remove').forEach((btn) => {
+    btn.addEventListener('click', () => btn.closest('tr').remove());
+  });
+  // A role that no longer supports a flag shouldn't leave that flag looking
+  // checked - the server already ignores it once the role changes, but the
+  // UI should say so too instead of showing a stale, meaningless checkmark.
+  tbody.querySelectorAll('.map-role').forEach((select) => {
+    select.addEventListener('change', () => {
+      const row = select.closest('tr');
+      if (select.value !== 'group') {
+        row.querySelector('.map-primary').checked = false;
+        row.querySelector('.map-date').checked = false;
+      }
+      if (select.value !== 'header') {
+        row.querySelector('.map-buyer').checked = false;
+      }
+    });
+  });
+}
+
+function collectMappingFromTable(tbody) {
+  const rows = [...tbody.querySelectorAll('tr')];
+  const existingKeys = new Set(rows.map((row) => row.querySelector('.map-key').value.trim()).filter(Boolean));
+  return rows.map((row) => {
+    const label = row.querySelector('.map-label').value.trim();
+    let key = row.querySelector('.map-key').value.trim();
+    if (!key) { key = slugToKey(label, existingKeys); existingKeys.add(key); }
+    return {
+      key,
+      label,
+      sourceHeader: row.querySelector('.map-source').value.trim(),
+      role: row.querySelector('.map-role').value,
+      primaryGroupField: row.querySelector('.map-primary').checked,
+      dateField: row.querySelector('.map-date').checked,
+      buyerField: row.querySelector('.map-buyer').checked,
+      format: row.querySelector('.map-decimal').checked ? 'decimal2' : undefined,
+      requiredRow: row.querySelector('.map-required-row').checked,
+      requiredHeader: !row.querySelector('.map-optional').checked,
+    };
+  });
+}
+
+function renderMappingFieldErrors(container, fieldErrors) {
+  if (!fieldErrors || !fieldErrors.length) { container.hidden = true; container.innerHTML = ''; return; }
+  container.hidden = false;
+  container.innerHTML = fieldErrors.map((fe) => `<li>${escapeHtml(fe.message)}</li>`).join('');
+}
+
+function applyDetectedHeaders(tbody, headers) {
+  // Best-effort: matches each detected column name to a mapping row whose
+  // label looks similar, then fills in that row's "Your column name". The
+  // operator can still correct any mismatch by hand before saving.
+  const normalize = (s) => String(s || '').trim().toLowerCase();
+  const remaining = [...headers];
+  [...tbody.querySelectorAll('tr')].forEach((row) => {
+    const sourceInput = row.querySelector('.map-source');
+    const label = normalize(row.querySelector('.map-label').value);
+    const matchIdx = remaining.findIndex((h) => {
+      const nh = normalize(h);
+      return nh === label || (label && (nh.includes(label) || label.includes(nh)));
+    });
+    if (matchIdx !== -1) {
+      sourceInput.value = remaining[matchIdx];
+      remaining.splice(matchIdx, 1);
+    }
+  });
+}
+
+// ---------- Settings: message template ----------
+function buildPlaceholderChipsHtml(fields) {
+  const headerAllowed = fields.filter((f) => ['broker_name', 'broker_phone', 'group', 'header'].includes(f.role)).map((f) => f.key);
+  const lineAllowed = fields.filter((f) => f.role === 'line').map((f) => f.key);
+  const chips = [
+    ...headerAllowed.map((k) => ({ key: k, scope: 'header' })),
+    { key: 'buyerLine', scope: 'header' },
+    { key: 'lineItems', scope: 'header' },
+    ...lineAllowed.map((k) => ({ key: k, scope: 'line' })),
+    { key: 'index', scope: 'line' },
+  ];
+  return chips.map((c) => `<button type="button" class="placeholder-chip" data-key="${escapeHtml(c.key)}" data-scope="${c.scope}">{{${escapeHtml(c.key)}}}</button>`).join('');
+}
+
+const templatePreviewTimers = {};
+function scheduleTemplatePreviewFor(ids) {
+  clearTimeout(templatePreviewTimers[ids.preview]);
+  templatePreviewTimers[ids.preview] = setTimeout(() => renderTemplatePreviewFor(ids), 350);
+}
+
+async function renderTemplatePreviewFor(ids) {
+  const preview = document.getElementById(ids.preview);
+  if (!preview) return;
+  try {
+    const data = await apiFetch('/api/config/template/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        headerTemplate: document.getElementById(ids.header).value,
+        lineItemTemplate: document.getElementById(ids.line).value,
+        buyerLineTemplate: document.getElementById(ids.buyer).value,
+        lineItemSeparator: '\n',
+      }),
+    });
+    preview.textContent = data.message;
+  } catch (error) {
+    preview.textContent = error.message || 'Preview unavailable.';
+  }
+}
+
+// Tracks which template editors have already had their persistent textarea
+// listeners wired, keyed by the preview element id (unique per editor
+// instance). Settings' textareas are static, never-recreated DOM nodes, so
+// re-running this on every "Save mapping" would otherwise stack a fresh set
+// of focus/input listeners on top of the old ones every time.
+const wiredTemplateEditors = new Set();
+let templateEditorLastFocused = {};
+
+function wireTemplateChips(ids) {
+  document.querySelectorAll(`#${ids.chips} .placeholder-chip`).forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const lastFocused = templateEditorLastFocused[ids.preview] || ids.header;
+      const targetId = chip.dataset.scope === 'line' ? ids.line : (lastFocused !== ids.line ? lastFocused : ids.header);
+      const el = document.getElementById(targetId);
+      const token = `{{${chip.dataset.key}}}`;
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? el.value.length;
+      el.value = el.value.slice(0, start) + token + el.value.slice(end);
+      el.focus();
+      el.selectionStart = el.selectionEnd = start + token.length;
+      scheduleTemplatePreviewFor(ids);
+    });
+  });
+}
+
+function wireTemplateEditor(ids) {
+  if (!wiredTemplateEditors.has(ids.preview)) {
+    wiredTemplateEditors.add(ids.preview);
+    templateEditorLastFocused[ids.preview] = ids.header;
+    [ids.header, ids.line, ids.buyer].forEach((id) => {
+      const el = document.getElementById(id);
+      el.addEventListener('focus', () => { templateEditorLastFocused[ids.preview] = id; });
+      el.addEventListener('input', () => scheduleTemplatePreviewFor(ids));
+    });
+  }
+  // Chip buttons ARE recreated whenever the mapping changes, so it's safe
+  // (and necessary) to re-wire just these every time.
+  wireTemplateChips(ids);
+  scheduleTemplatePreviewFor(ids);
+}
+
+// ---------- Settings view ----------
+const SETTINGS_TEMPLATE_IDS = {
+  header: 'headerTemplateInput',
+  line: 'lineItemTemplateInput',
+  buyer: 'buyerLineTemplateInput',
+  chips: 'templatePlaceholderChips',
+  preview: 'templatePreview',
+};
+
+async function loadSettingsMapping() {
+  const data = await apiFetch('/api/config/mapping');
+  renderMappingRows(document.getElementById('mappingTableBody'), data.fields);
+}
+
+async function loadSettingsTemplate() {
+  const [template, mapping] = await Promise.all([
+    apiFetch('/api/config/template'),
+    apiFetch('/api/config/mapping'),
+  ]);
+  document.getElementById('headerTemplateInput').value = template.headerTemplate || '';
+  document.getElementById('lineItemTemplateInput').value = template.lineItemTemplate || '';
+  document.getElementById('buyerLineTemplateInput').value = template.buyerLineTemplate || '';
+  document.getElementById('templatePlaceholderChips').innerHTML = buildPlaceholderChipsHtml(mapping.fields);
+  wireTemplateEditor(SETTINGS_TEMPLATE_IDS);
+}
+
+async function loadAutoSendSetting() {
+  const data = await apiFetch('/api/config/auto-send');
+  document.getElementById('autoSendToggle').checked = data.enabled === true;
+}
+
+async function initSettingsView() {
+  try {
+    await Promise.all([loadSettingsMapping(), loadSettingsTemplate(), loadAutoSendSetting()]);
+  } catch (error) {
+    showToast(error.message || 'Could not load Settings.', 'error');
+  }
+}
+
+document.getElementById('autoSendToggle').addEventListener('change', async (event) => {
+  const checkbox = event.target;
+  const enabled = checkbox.checked;
+  checkbox.disabled = true;
+  try {
+    await apiFetch('/api/config/auto-send', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    showToast(enabled ? 'Automatic sending turned on for new imports.' : 'Automatic sending turned off.', 'success');
+  } catch (error) {
+    checkbox.checked = !enabled;
+    showToast(error.message || 'Could not save this setting.', 'error');
+  } finally {
+    checkbox.disabled = false;
+  }
+});
+
+document.getElementById('addMappingFieldBtn').addEventListener('click', () => {
+  const tbody = document.getElementById('mappingTableBody');
+  tbody.insertAdjacentHTML('beforeend', mappingRowHtml({ role: 'line', requiredHeader: true }));
+  const rows = tbody.querySelectorAll('tr');
+  const last = rows[rows.length - 1];
+  last.querySelector('.map-remove').addEventListener('click', () => last.remove());
+  last.querySelector('.map-label').focus();
+});
+
+document.getElementById('saveMappingBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('saveMappingBtn');
+  const fields = collectMappingFromTable(document.getElementById('mappingTableBody'));
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Saving…';
+  try {
+    const data = await apiFetch('/api/config/mapping', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+    renderMappingFieldErrors(document.getElementById('mappingErrors'), []);
+    renderMappingRows(document.getElementById('mappingTableBody'), data.fields);
+    showToast('Column mapping saved. This only affects workbooks imported from now on.', 'success');
+    const chipMapping = await apiFetch('/api/config/mapping');
+    document.getElementById('templatePlaceholderChips').innerHTML = buildPlaceholderChipsHtml(chipMapping.fields);
+    wireTemplateEditor(SETTINGS_TEMPLATE_IDS);
+  } catch (error) {
+    renderMappingFieldErrors(
+      document.getElementById('mappingErrors'),
+      error.fieldErrors && error.fieldErrors.length ? error.fieldErrors : [{ message: error.message }],
+    );
+    showToast(error.message || 'Could not save the column mapping.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save mapping';
+  }
+});
+
+document.getElementById('resetMappingBtn').addEventListener('click', async () => {
+  if (!confirm('Reset column mapping to the application default? Unsaved changes here will be lost.')) return;
+  try {
+    const defaults = await apiFetch('/api/config/mapping/default');
+    renderMappingRows(document.getElementById('mappingTableBody'), defaults.fields);
+    renderMappingFieldErrors(document.getElementById('mappingErrors'), []);
+    showToast('Mapping reset to default. Choose Save mapping to keep this.', 'info');
+  } catch (error) {
+    showToast(error.message || 'Could not load the default mapping.', 'error');
+  }
+});
+
+document.getElementById('detectHeadersInput').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  const hint = document.getElementById('detectHeadersHint');
+  hint.textContent = 'Reading header row…';
+  try {
+    const res = await fetch('/api/config/detect-headers', { method: 'POST', body: fd });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not read this workbook.');
+    applyDetectedHeaders(document.getElementById('mappingTableBody'), data.headers);
+    hint.textContent = `Detected ${data.headers.length} column(s) from "${file.name}".`;
+    showToast('Detected columns applied below. Review, then Save mapping.', 'success');
+  } catch (error) {
+    hint.textContent = 'Optional — reads only the header row.';
+    showToast(error.message || 'Could not read this workbook.', 'error');
+  } finally {
+    event.target.value = '';
+  }
+});
+
+document.getElementById('saveTemplateBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('saveTemplateBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Saving…';
+  try {
+    await apiFetch('/api/config/template', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        headerTemplate: document.getElementById('headerTemplateInput').value,
+        lineItemTemplate: document.getElementById('lineItemTemplateInput').value,
+        buyerLineTemplate: document.getElementById('buyerLineTemplateInput').value,
+        lineItemSeparator: '\n',
+      }),
+    });
+    showToast('Message template saved. This only affects workbooks imported from now on.', 'success');
+  } catch (error) {
+    showToast(error.message || 'Could not save the message template.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save template';
+  }
+});
+
+document.getElementById('resetTemplateBtn').addEventListener('click', async () => {
+  if (!confirm('Reset the message template to the application default? Unsaved changes here will be lost.')) return;
+  try {
+    const defaults = await apiFetch('/api/config/template/default');
+    document.getElementById('headerTemplateInput').value = defaults.headerTemplate;
+    document.getElementById('lineItemTemplateInput').value = defaults.lineItemTemplate;
+    document.getElementById('buyerLineTemplateInput').value = defaults.buyerLineTemplate;
+    scheduleTemplatePreviewFor(SETTINGS_TEMPLATE_IDS);
+    showToast('Template reset to default. Choose Save template to keep this.', 'info');
+  } catch (error) {
+    showToast(error.message || 'Could not load the default template.', 'error');
+  }
+});
+
+document.getElementById('rerunWizardBtn').addEventListener('click', () => openWizard('welcome'));
+
+// ---------- Setup Wizard ----------
+const WIZARD_SEGMENT_INDEX = { mapping: 0, template: 1, backup: 2, finish: 3 };
+const WIZARD_STEP_LABEL = {
+  welcome: 'Welcome',
+  mapping: 'Step 1 of 4 — Column mapping',
+  template: 'Step 2 of 4 — Message template',
+  backup: 'Step 3 of 4 — Backups',
+  finish: 'Step 4 of 4 — Finish',
+};
+
+function updateWizardProgress(step) {
+  const idx = WIZARD_SEGMENT_INDEX[step];
+  document.querySelectorAll('#wizardSteps span').forEach((span, i) => {
+    span.classList.toggle('active', i === idx);
+    span.classList.toggle('done', idx !== undefined && i < idx);
+  });
+  document.getElementById('wizardStepLabel').textContent = WIZARD_STEP_LABEL[step] || '';
+}
+
+function openWizard(step = 'welcome') {
+  const overlay = document.getElementById('setupWizardOverlay');
+  if (!overlay.classList.contains('open')) {
+    wizardModalReturnFocus = document.activeElement;
+    overlay.classList.add('open');
+    overlay.setAttribute('aria-hidden', 'false');
+  }
+  const renderers = {
+    welcome: renderWizardWelcome,
+    mapping: renderWizardMapping,
+    template: renderWizardTemplate,
+    backup: renderWizardBackup,
+    finish: renderWizardFinish,
+  };
+  (renderers[step] || renderWizardWelcome)();
+  setTimeout(() => {
+    const focusable = overlay.querySelector('button:not([disabled])');
+    if (focusable) focusable.focus();
+  }, 0);
+}
+
+function closeWizard() {
+  const overlay = document.getElementById('setupWizardOverlay');
+  if (!overlay.classList.contains('open')) return;
+  overlay.classList.remove('open');
+  overlay.setAttribute('aria-hidden', 'true');
+  if (wizardModalReturnFocus && typeof wizardModalReturnFocus.focus === 'function') wizardModalReturnFocus.focus();
+  wizardModalReturnFocus = null;
+}
+
+function renderWizardWelcome() {
+  wizardStep = 'welcome';
+  updateWizardProgress('welcome');
+  document.getElementById('wizardBody').innerHTML = `
+    <div class="wizard-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3h12l4 5-10 13L2 8l4-5Z"/></svg></div>
+    <p class="auth-explainer">Let's set up how this installation reads your Excel workbook and writes WhatsApp messages. It only takes a minute, and everything here can be changed later from Settings.</p>
+    <div class="modal-footer">
+      <button class="btn" id="wizardSkipBtn" type="button">Not now</button>
+      <button class="btn btn-primary" id="wizardStartBtn" type="button">Get started</button>
+    </div>
+  `;
+  document.getElementById('wizardSkipBtn').addEventListener('click', closeWizard);
+  document.getElementById('wizardStartBtn').addEventListener('click', renderWizardMapping);
+}
+
+async function renderWizardMapping() {
+  wizardStep = 'mapping';
+  updateWizardProgress('mapping');
+  document.getElementById('wizardBody').innerHTML = '<p class="muted"><span class="spinner"></span> Loading current column mapping…</p>';
+  let fields;
+  try {
+    ({ fields } = await apiFetch('/api/config/mapping'));
+  } catch (error) {
+    showToast(error.message || 'Could not load the column mapping.', 'error');
+    fields = [];
+  }
+  document.getElementById('wizardBody').innerHTML = `
+    <p class="auth-explainer">Map each field to the exact column name used in your Excel workbook. Today's common column names are suggested already — change only what's different for you.</p>
+    <div class="detect-headers-picker">
+      <input class="visually-hidden" type="file" id="wizardDetectHeadersInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      <label class="btn file-picker-button" for="wizardDetectHeadersInput">Auto-detect from a sample file</label>
+      <span class="muted" id="wizardDetectHeadersHint">Optional — reads only the header row.</span>
+    </div>
+    <ul class="mapping-field-errors" id="wizardMappingErrors" hidden></ul>
+    <div class="mapping-table-wrap">
+      <table class="mapping-table">
+        <thead><tr><th>Field</th><th>Your column name</th><th>Role</th><th>Options</th><th></th></tr></thead>
+        <tbody id="wizardMappingBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="wizardMappingBackBtn" type="button">Back</button>
+      <button class="btn btn-primary" id="wizardMappingNextBtn" type="button">Save and continue</button>
+    </div>
+  `;
+  renderMappingRows(document.getElementById('wizardMappingBody'), fields);
+  document.getElementById('wizardMappingBackBtn').addEventListener('click', renderWizardWelcome);
+  document.getElementById('wizardDetectHeadersInput').addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    const hint = document.getElementById('wizardDetectHeadersHint');
+    hint.textContent = 'Reading header row…';
+    try {
+      const res = await fetch('/api/config/detect-headers', { method: 'POST', body: fd });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'Could not read this workbook.');
+      applyDetectedHeaders(document.getElementById('wizardMappingBody'), body.headers);
+      hint.textContent = `Detected ${body.headers.length} column(s) from "${file.name}".`;
+    } catch (error) {
+      hint.textContent = 'Optional — reads only the header row.';
+      showToast(error.message || 'Could not read this workbook.', 'error');
+    } finally {
+      event.target.value = '';
+    }
+  });
+  document.getElementById('wizardMappingNextBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('wizardMappingNextBtn');
+    const collected = collectMappingFromTable(document.getElementById('wizardMappingBody'));
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Saving…';
+    try {
+      await apiFetch('/api/config/mapping', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: collected }),
+      });
+      renderWizardTemplate();
+    } catch (error) {
+      renderMappingFieldErrors(
+        document.getElementById('wizardMappingErrors'),
+        error.fieldErrors && error.fieldErrors.length ? error.fieldErrors : [{ message: error.message }],
+      );
+      btn.disabled = false;
+      btn.textContent = 'Save and continue';
+    }
+  });
+}
+
+async function renderWizardTemplate() {
+  wizardStep = 'template';
+  updateWizardProgress('template');
+  document.getElementById('wizardBody').innerHTML = '<p class="muted"><span class="spinner"></span> Loading message template…</p>';
+  let template;
+  let mapping;
+  try {
+    [template, mapping] = await Promise.all([apiFetch('/api/config/template'), apiFetch('/api/config/mapping')]);
+  } catch (error) {
+    showToast(error.message || 'Could not load the message template.', 'error');
+    template = { headerTemplate: '', lineItemTemplate: '', buyerLineTemplate: '' };
+    mapping = { fields: [] };
+  }
+  document.getElementById('wizardBody').innerHTML = `
+    <p class="auth-explainer">Write the WhatsApp message once, using <code>{{placeholders}}</code>. Click a chip to insert it into the focused field.</p>
+    <div class="placeholder-chip-list" id="wizardPlaceholderChips">${buildPlaceholderChipsHtml(mapping.fields)}</div>
+    <div class="field-group">
+      <label for="wizardHeaderTemplateInput">Message template</label>
+      <textarea id="wizardHeaderTemplateInput" rows="7">${escapeHtml(template.headerTemplate || '')}</textarea>
+    </div>
+    <div class="field-group">
+      <label for="wizardLineItemTemplateInput">Line item template (repeats once per row)</label>
+      <textarea id="wizardLineItemTemplateInput" rows="2">${escapeHtml(template.lineItemTemplate || '')}</textarea>
+    </div>
+    <div class="field-group">
+      <label for="wizardBuyerLineTemplateInput">Buyer line (only shown when a buyer is present)</label>
+      <textarea id="wizardBuyerLineTemplateInput" rows="2">${escapeHtml(template.buyerLineTemplate || '')}</textarea>
+    </div>
+    <p class="template-preview-label">Live preview</p>
+    <div class="template-preview" id="wizardTemplatePreview">Preview will appear here…</div>
+    <div class="modal-footer">
+      <button class="btn" id="wizardTemplateBackBtn" type="button">Back</button>
+      <button class="btn btn-primary" id="wizardTemplateNextBtn" type="button">Save and continue</button>
+    </div>
+  `;
+  const wizardTemplateIds = {
+    header: 'wizardHeaderTemplateInput',
+    line: 'wizardLineItemTemplateInput',
+    buyer: 'wizardBuyerLineTemplateInput',
+    chips: 'wizardPlaceholderChips',
+    preview: 'wizardTemplatePreview',
+  };
+  wireTemplateEditor(wizardTemplateIds);
+  document.getElementById('wizardTemplateBackBtn').addEventListener('click', renderWizardMapping);
+  document.getElementById('wizardTemplateNextBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('wizardTemplateNextBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Saving…';
+    try {
+      await apiFetch('/api/config/template', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          headerTemplate: document.getElementById('wizardHeaderTemplateInput').value,
+          lineItemTemplate: document.getElementById('wizardLineItemTemplateInput').value,
+          buyerLineTemplate: document.getElementById('wizardBuyerLineTemplateInput').value,
+          lineItemSeparator: '\n',
+        }),
+      });
+      renderWizardBackup();
+    } catch (error) {
+      showToast(error.message || 'Could not save the message template.', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Save and continue';
+    }
+  });
+}
+
+async function renderWizardBackup() {
+  wizardStep = 'backup';
+  updateWizardProgress('backup');
+  const status = lastBackupStatus || await refreshBackupStatus();
+  document.getElementById('wizardBody').innerHTML = `
+    <p class="auth-explainer">Choose a folder for this department's independent daily backups. The app uses the daily time already selected on this PC (default 5:00 PM) and creates the year/month folders itself.</p>
+    <div class="backup-folder-example" aria-label="Example backup folder structure">
+      <span>Selected backup folder</span>
+      <span aria-hidden="true">&boxur;&nbsp; 2026</span>
+      <span aria-hidden="true">&nbsp;&nbsp; &boxur;&nbsp; 07</span>
+    </div>
+    <p class="muted">${status && status.configured ? `Already configured: <strong>${escapeHtml(status.folder)}</strong>` : 'Nothing selected yet.'}</p>
+    <p class="field-hint" id="wizardBackupError" role="alert" hidden></p>
+    <div class="modal-footer">
+      <button class="btn" id="wizardBackupBackBtn" type="button">Back</button>
+      <button class="btn" id="wizardBackupSkipBtn" type="button">Skip for now</button>
+      <button class="btn btn-primary" id="wizardBackupChooseBtn" type="button">${status && status.configured ? 'Change folder' : 'Choose backup folder'}</button>
+    </div>
+    <p class="native-dialog-hint" id="wizardBackupChooserHint" role="status" hidden>A Windows folder window is open. Choose a folder there, or press Cancel to return.</p>
+  `;
+  document.getElementById('wizardBackupBackBtn').addEventListener('click', renderWizardTemplate);
+  document.getElementById('wizardBackupSkipBtn').addEventListener('click', renderWizardFinish);
+  document.getElementById('wizardBackupChooseBtn').addEventListener('click', (event) => {
+    chooseBackupFolder(event.currentTarget, {
+      hintId: 'wizardBackupChooserHint',
+      onError: (message) => {
+        const err = document.getElementById('wizardBackupError');
+        if (!err) return;
+        err.textContent = message;
+        err.hidden = !message;
+      },
+      onSuccess: () => {
+        showToast('Backup folder saved for this department', 'success');
+        renderWizardFinish();
+      },
+    });
+  });
+}
+
+function renderWizardFinish() {
+  wizardStep = 'finish';
+  updateWizardProgress('finish');
+  document.getElementById('wizardBody').innerHTML = `
+    <div class="wizard-intro-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg></div>
+    <p class="auth-explainer">Setup complete. You can revisit column mapping, the message template, and backups any time from <strong>Settings</strong>.</p>
+    <div class="modal-footer">
+      <button class="btn btn-primary" id="wizardFinishBtn" type="button">Go to dashboard</button>
+    </div>
+  `;
+  document.getElementById('wizardFinishBtn').addEventListener('click', async () => {
+    try {
+      await apiFetch('/api/config/onboarding', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completed: true }),
+      });
+    } catch { /* the wizard still closes even if this write fails - it can be reopened from Settings */ }
+    closeWizard();
+    showView('dashboard');
+    await Promise.all([loadSettingsMapping(), loadSettingsTemplate()]).catch(() => {});
+  });
+}
+
+document.getElementById('wizardClose').addEventListener('click', closeWizard);
+document.getElementById('setupWizardOverlay').addEventListener('click', (event) => {
+  if (event.target.id === 'setupWizardOverlay') closeWizard();
+});
+document.addEventListener('keydown', (event) => {
+  const overlay = document.getElementById('setupWizardOverlay');
+  if (!overlay.classList.contains('open')) return;
+  if (event.key === 'Escape') {
+    closeWizard();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = [...overlay.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])')];
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+});
+
+async function maybePromptSetupWizard(waStatus) {
+  if (wizardPromptHandled) return;
+  if (!waStatus || waStatus.status !== 'ready') return;
+  try {
+    const onboarding = await apiFetch('/api/config/onboarding');
+    wizardPromptHandled = true;
+    if (!onboarding.completed) openWizard('welcome');
+  } catch { /* transient failure - try again on the next tick */ }
+}
+
 // ---------- Live updates ----------
 let tickInFlight = null;
 let tickRequestedAgain = false;
@@ -1327,8 +2030,9 @@ function tick() {
     do {
       tickRequestedAgain = false;
       // Status first: renderLogs/updateBulkBar read waReady.
-      await refreshStatus();
+      const wa = await refreshStatus();
       await Promise.allSettled([refreshBackupStatus(), refreshLogs(), refreshBrokers()]);
+      await maybePromptSetupWizard(wa);
     } while (tickRequestedAgain);
   })().finally(() => { tickInFlight = null; });
   return tickInFlight;
@@ -1340,6 +2044,26 @@ function connectLiveEvents() {
   es.onerror = () => {
     // EventSource retries on its own; keep the periodic fallback poll running underneath.
   };
+  // Gives visibility into duplicate-import outcomes that a plain "update"
+  // ping cannot: without this, re-importing an already-imported workbook
+  // looks identical to a fresh import.
+  es.addEventListener('import-summary', (event) => {
+    let summary;
+    try { summary = JSON.parse(event.data); } catch { return; }
+    if (!summary.ok) {
+      showToast(`${summary.fileName}: import failed - ${summary.error || 'moved to failed-imports'}.`, 'error');
+      return;
+    }
+    const parts = [];
+    if (summary.insertedCount) parts.push(`${summary.insertedCount} new`);
+    if (summary.duplicateSkippedCount) parts.push(`${summary.duplicateSkippedCount} already imported`);
+    if (summary.contentDuplicateCount) {
+      parts.push(`${summary.contentDuplicateCount} possible duplicate${summary.contentDuplicateCount === 1 ? '' : 's'} flagged`);
+    }
+    if (!parts.length) return;
+    const hasWarning = summary.duplicateSkippedCount > 0 || summary.contentDuplicateCount > 0;
+    showToast(`${summary.fileName}: ${parts.join(', ')}.`, hasWarning ? 'info' : 'success');
+  });
 }
 
 let bootStarted = false;
@@ -1349,6 +2073,7 @@ function boot() {
   void tick();
   connectLiveEvents();
   setInterval(() => { void tick(); }, 15000); // fallback in case SSE drops
+  void initSettingsView();
 }
 
 // ---------- Auth gate ----------

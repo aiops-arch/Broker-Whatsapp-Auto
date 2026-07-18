@@ -6,6 +6,13 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 
+// backup.js requires db.js (for the data-directory containment check), which
+// opens its SQLite file at module load time - point it at an isolated temp
+// directory before requiring backup.js, so this test never touches the real
+// installation's app/data/app.db.
+const isolatedDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broker-backup-test-db-'));
+process.env.BROKER_APP_DATA_DIR = isolatedDataDir;
+
 const {
   BACKUP_TIME_SETTING,
   BACKUP_ROOT_SETTING,
@@ -15,6 +22,13 @@ const {
   latestDueScheduledTime,
   scheduledDestination,
 } = require('../src/backup');
+const db = require('../src/db');
+
+test.after(() => {
+  db.db.close();
+  fs.rmSync(isolatedDataDir, { recursive: true, force: true });
+  delete process.env.BROKER_APP_DATA_DIR;
+});
 
 const temporaryRoots = [];
 
@@ -82,6 +96,40 @@ async function flushPromises() {
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
 }
+
+test('a backup folder inside the app data directory is rejected', async () => {
+  const context = makeManager();
+  await context.manager.start();
+  const nested = path.join(db.DATA_DIR, 'nested-backup-folder');
+  await assert.rejects(
+    context.manager.setRoot(nested),
+    (error) => error.code === 'INVALID_BACKUP_FOLDER',
+  );
+  await assert.rejects(
+    context.manager.setRoot(db.DATA_DIR),
+    (error) => error.code === 'INVALID_BACKUP_FOLDER',
+  );
+});
+
+test('a backup folder that would contain the app data directory is also rejected', async () => {
+  const context = makeManager();
+  await context.manager.start();
+  const parentOfDataDir = path.dirname(db.DATA_DIR);
+  await assert.rejects(
+    context.manager.setRoot(parentOfDataDir),
+    (error) => error.code === 'INVALID_BACKUP_FOLDER',
+  );
+});
+
+test('a backup folder inside the app install directory is rejected', async () => {
+  const context = makeManager();
+  await context.manager.start();
+  const installDir = path.resolve(__dirname, '..');
+  await assert.rejects(
+    context.manager.setRoot(path.join(installDir, 'src')),
+    (error) => error.code === 'INVALID_BACKUP_FOLDER',
+  );
+});
 
 test('does nothing until a backup folder is configured', async () => {
   const context = makeManager();

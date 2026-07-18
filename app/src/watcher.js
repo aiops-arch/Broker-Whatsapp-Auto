@@ -3,6 +3,7 @@ const path = require('node:path');
 const chokidar = require('chokidar');
 const { parseWorkbook } = require('./excelParser');
 const db = require('./db');
+const messageConfig = require('./messageConfig');
 const bus = require('./events');
 const { resolveAttachmentFile, validateStoredAttachmentPath } = require('./attachmentPolicy');
 const { coordinateMessageSends } = require('./sendCoordinator');
@@ -53,11 +54,32 @@ function queueUploadedWorkbook(stagedPath, originalName) {
   return moveFileExclusive(stagedPath, INCOMING_DIR, uniqueImportName(validation.safeName));
 }
 
+// Sends only the ids from the import that JUST completed (never a
+// listMessages({status:'draft'}) query), so turning the toggle on can never
+// retroactively vacuum up older drafts the operator intentionally left
+// unsent. Reuses the exact same sendMessagesByIds path as bulk-send, so
+// needs_info/duplicate-flagged/not-ready rows are skipped for free.
+async function maybeAutoSend(insertedIds, whatsappService) {
+  if (!insertedIds.length || !(await messageConfig.getAutoSendEnabled())) return;
+  try {
+    await sendMessagesByIds(insertedIds, whatsappService, { auto: true });
+  } catch (autoSendError) {
+    console.error('[watcher] auto-send failed:', autoSendError.message);
+  }
+}
+
 // Drops from the Excel file only ever create drafts for review - nothing is
-// sent automatically. Sending is always an explicit action from the dashboard.
+// sent automatically, unless the operator has explicitly turned on auto-send
+// in Settings (see the end of the try block below), in which case only THIS
+// import's own complete, non-duplicate-flagged rows are sent - never older
+// drafts already sitting in the queue.
 async function ingestFile(filePath, whatsappService) {
   ensureImportDirectories();
   const fileName = path.basename(filePath);
+  const insertedIds = [];
+  let insertedCount = 0;
+  let duplicateSkippedCount = 0; // exact re-import of the same broker+party+date+stones (dedup_key)
+  let contentDuplicateCount = 0; // possible duplicate: same party+stones to the same phone from a different import
   try {
     if (!isXlsxName(fileName)) {
       throw importError(
@@ -70,7 +92,7 @@ async function ingestFile(filePath, whatsappService) {
 
     for (const g of groups) {
       const existing = await db.findByDedupKey(g.dedupKey);
-      if (existing) continue; // exact duplicate demand already logged
+      if (existing) { duplicateSkippedCount += 1; continue; } // exact duplicate demand already logged
 
       let phone = g.phoneFromSheet || (g.brokerName ? await db.getBrokerPhone(g.brokerName) : null);
       if (g.brokerName && g.phoneFromSheet) {
@@ -87,27 +109,54 @@ async function ingestFile(filePath, whatsappService) {
         else attachmentError = attachment.error;
       }
 
-      await db.insertMessage({
-        dedupKey: g.dedupKey,
-        demandDate: g.demandDate,
-        brokerName: g.brokerName || '(unassigned)',
-        partyName: g.partyName,
-        buyerName: g.buyerName,
-        phone,
-        message: g.message || '(no message - broker name missing in source sheet)',
-        stoneCount: g.stoneCount,
-        attachmentPath,
-        validationError: attachmentError,
-        sourceFile: fileName,
-      });
+      let insertedId;
+      try {
+        insertedId = await db.insertMessage({
+          dedupKey: g.dedupKey,
+          demandDate: g.demandDate,
+          brokerName: g.brokerName || '(unassigned)',
+          partyName: g.partyName,
+          buyerName: g.buyerName,
+          phone,
+          message: g.message || '(no message - broker name missing in source sheet)',
+          stoneCount: g.stoneCount,
+          attachmentPath,
+          validationError: attachmentError,
+          sourceFile: fileName,
+          dedupComponentSignature: g.dedupComponentSignature,
+        });
+      } catch (insertError) {
+        if (insertError?.code === 'DUPLICATE_DEDUP_KEY') {
+          // A concurrent import raced this exact row in between the
+          // findByDedupKey check above and the insert - treat it the same as
+          // that check instead of quarantining every other row in this file.
+          duplicateSkippedCount += 1;
+          continue;
+        }
+        throw insertError;
+      }
+
+      insertedIds.push(insertedId);
+      insertedCount += 1;
+      const insertedRow = await db.getMessage(insertedId);
+      if (insertedRow?.duplicate_of_id) contentDuplicateCount += 1;
       bus.emit('update');
     }
 
     const processedPath = moveFileExclusive(filePath, PROCESSED_DIR, uniqueImportName(fileName));
     bus.emit('update');
-    return { ok: true, groupCount: groups.length, processedPath };
+    bus.emit('import-summary', {
+      fileName, insertedCount, duplicateSkippedCount, contentDuplicateCount, ok: true, error: null,
+    });
+
+    await maybeAutoSend(insertedIds, whatsappService);
+
+    return { ok: true, groupCount: groups.length, processedPath, insertedCount, duplicateSkippedCount, contentDuplicateCount };
   } catch (error) {
     console.error(`[watcher] failed to import ${fileName}:`, operatorMessage(error));
+    bus.emit('import-summary', {
+      fileName, insertedCount, duplicateSkippedCount, contentDuplicateCount, ok: false, error: operatorMessage(error),
+    });
     if (!fs.existsSync(filePath)) {
       recordWatcherError(error);
       return { ok: false, error: operatorMessage(error), code: error.code || 'IMPORT_FAILED' };
@@ -128,13 +177,19 @@ async function ingestFile(filePath, whatsappService) {
   }
 }
 
-// Sends a specific set of message rows (used by the per-row Send/Retry button
-// and by bulk "Send selected"/"Send all drafts"), one at a time.
-async function sendMessagesByIds(ids, whatsappService) {
+// Sends a specific set of message rows (used by the per-row Send/Retry button,
+// bulk "Send selected"/"Send all drafts", and the auto-send trigger above),
+// one at a time. `options.confirmedIds` (single-row Send/Retry only) and
+// `options.auto` (auto-send only) are forwarded to the coordinator - bulk
+// callers never set either, so a duplicate-flagged row can only ever be sent
+// through its own explicit, confirmed Send/Retry action.
+async function sendMessagesByIds(ids, whatsappService, options = {}) {
   return coordinateMessageSends(ids, whatsappService, {
     store: db,
     notifyUpdate: () => bus.emit('update'),
     validateAttachment: (attachmentPath) => validateStoredAttachmentPath(attachmentPath, ATTACHMENTS_DIR),
+    confirmedIds: options.confirmedIds,
+    auto: options.auto,
   });
 }
 
@@ -173,6 +228,7 @@ module.exports = {
   ingestFile,
   sendMessagesByIds,
   sendAllDrafts,
+  maybeAutoSend,
   INCOMING_DIR,
   PROCESSED_DIR,
   ATTACHMENTS_DIR,
