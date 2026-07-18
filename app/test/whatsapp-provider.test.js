@@ -36,6 +36,10 @@ function providerWithoutBrowser() {
   provider._now = () => 1710000000000;
   provider._fsPromises = fs.promises;
   provider._resetInProgress = false;
+  provider._autoReconnectAttempts = 0;
+  provider._autoReconnectTimer = null;
+  provider._autoReconnectDelayMs = 5;
+  provider._maxAutoReconnectAttempts = 3;
   provider.authDataPath = resolveAuthDataPath(path.join(os.tmpdir(), 'unused-provider-data'));
   provider.authSessionPath = path.join(provider.authDataPath, 'session');
   return provider;
@@ -405,4 +409,70 @@ test('resetSetup rejects a linked or junction auth root', async (t) => {
 
   await assert.rejects(() => provider.resetSetup(), (error) => error.code === 'UNSAFE_WHATSAPP_SESSION_PATH');
   assert.equal(fs.existsSync(statePath), true);
+});
+
+test('a non-LOGOUT disconnect on a ready client attempts a bounded automatic reconnect instead of demanding a re-link', async () => {
+  const provider = providerWithoutBrowser();
+  provider.status = 'ready';
+  const { client } = fakeBrowserClient();
+  provider.client = client;
+  provider._bindClientEvents(client, 'qr', provider._generation);
+  const starts = [];
+  provider._startClient = async (...args) => { starts.push(args); };
+
+  client.emit('disconnected', 'CONFLICT');
+
+  assert.equal(provider.status, 'starting');
+  assert.match(provider.lastError, /Reconnecting automatically \(attempt 1\/3\)/);
+  assert.equal(starts.length, 0, 'the probe restart is delayed, not immediate');
+
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.deepEqual(starts, [['probe']]);
+});
+
+test('a LOGOUT disconnect still fully retires the client and requires manual re-link', async () => {
+  const provider = providerWithoutBrowser();
+  provider.status = 'ready';
+  const { client } = fakeBrowserClient();
+  provider.client = client;
+  provider._bindClientEvents(client, 'qr', provider._generation);
+  const starts = [];
+  provider._startClient = async (...args) => { starts.push(args); };
+
+  client.emit('disconnected', 'LOGOUT');
+  await nextTurn();
+
+  assert.equal(provider.status, 'disconnected');
+  assert.equal(provider.client, null);
+  assert.match(provider.lastError, /Try linking again with phone code or QR/);
+  assert.equal(starts.length, 0);
+});
+
+test('repeated non-LOGOUT disconnects eventually fall back to requiring manual re-link', async () => {
+  const provider = providerWithoutBrowser();
+  provider._maxAutoReconnectAttempts = 2;
+  provider.status = 'ready';
+
+  let current = fakeBrowserClient();
+  provider.client = current.client;
+  provider._bindClientEvents(current.client, 'qr', provider._generation);
+
+  let startCalls = 0;
+  provider._startClient = async (method) => {
+    startCalls += 1;
+    current = fakeBrowserClient();
+    provider.client = current.client;
+    provider._bindClientEvents(current.client, method, provider._generation);
+  };
+
+  current.client.emit('disconnected', 'CONFLICT'); // attempt 1
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  current.client.emit('disconnected', 'CONFLICT'); // attempt 2
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  current.client.emit('disconnected', 'CONFLICT'); // exceeds the cap of 2
+
+  assert.equal(startCalls, 2, 'only tried the automatic probe reconnect twice, matching the cap');
+  assert.equal(provider.status, 'disconnected');
+  assert.match(provider.lastError, /could not reconnect automatically/i);
 });

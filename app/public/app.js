@@ -1,10 +1,6 @@
-let currentStatusFilter = '';
-let logSearchTerm = '';
 let brokerSearchTerm = '';
-let lastLogs = [];
 let lastBrokers = [];
 let waReady = false;
-const selectedIds = new Set();
 let backupRefreshInFlight = null;
 let lastBackupStatus = null;
 let wizardPromptHandled = false;
@@ -799,6 +795,16 @@ async function refreshStatus() {
     navBadge.textContent = attention;
   }
 
+  // A new import can sweep an unresolved failed/send_uncertain row into
+  // Archive without actually resolving it - this keeps that visible instead
+  // of letting it quietly vanish from view.
+  const archivedAttention = Number(data.archivedAttention || 0);
+  const archiveBadge = document.getElementById('navArchiveBadge');
+  if (archiveBadge) {
+    archiveBadge.hidden = archivedAttention === 0;
+    archiveBadge.textContent = archivedAttention;
+  }
+
   const total = sent + draft + needsInfo + failed + sending + uncertain;
   const pct = (n) => (total ? (n / total) * 100 : 0);
   document.getElementById('segSent').style.width = pct(sent) + '%';
@@ -884,50 +890,8 @@ document.getElementById('saveBrokerBtn').addEventListener('click', async () => {
 });
 
 // ---------- Log table ----------
-// Remembers each row's last-seen status so we can flash a brief
-// success/failure highlight the moment a send actually resolves.
-const lastKnownStatus = new Map();
-
-async function refreshLogs() {
-  const url = '/api/logs' + (currentStatusFilter ? `?status=${currentStatusFilter}` : '');
-  const res = await fetch(url);
-  const newLogs = await res.json();
-
-  const transitions = [];
-  for (const row of newLogs) {
-    const prev = lastKnownStatus.get(row.id);
-    if (prev && prev !== row.status && ['sent', 'failed', 'send_uncertain'].includes(row.status)) {
-      transitions.push({ id: row.id, status: row.status });
-    }
-    lastKnownStatus.set(row.id, row.status);
-  }
-
-  lastLogs = newLogs;
-  const liveIds = new Set(lastLogs.map((r) => r.id));
-  const sendableIds = new Set(lastLogs.filter((row) => SENDABLE_STATUSES.has(row.status)).map((row) => row.id));
-  [...selectedIds].forEach((id) => {
-    if (!liveIds.has(id) || !sendableIds.has(id)) selectedIds.delete(id);
-  });
-  renderLogs();
-  transitions.forEach(({ id, status }) => flashRow(id, status));
-}
-
-function flashRow(id, status) {
-  const row = document.querySelector(`#logTable tbody tr[data-row-id="${id}"]`);
-  if (!row) return;
-  const cls = status === 'sent' ? 'flash-success' : 'flash-failed';
-  row.classList.add(cls);
-  setTimeout(() => row.classList.remove(cls), 1600);
-}
-
-function updateBulkBar() {
-  document.getElementById('selectedCount').textContent = selectedIds.size;
-  document.getElementById('sendSelectedBtn').disabled = selectedIds.size === 0 || !waReady;
-  document.getElementById('sendAllDraftsBtn').disabled = !waReady;
-  const tip = waReady ? '' : 'Connect WhatsApp before sending';
-  document.getElementById('sendSelectedBtn').title = tip;
-  document.getElementById('sendAllDraftsBtn').title = tip;
-}
+// Statuses whose arrival deserves a brief flash-highlight once a send resolves.
+const FLASH_ON_STATUSES = new Set(['sent', 'failed', 'send_uncertain']);
 
 function deliveryBadge(row) {
   if (row.status !== 'sent' || !row.delivery_status) return '';
@@ -941,47 +905,25 @@ function deliveryBadge(row) {
   return ` <span class="delivery-badge ${d.cls}" title="${d.title}">${d.icon}</span>`;
 }
 
-function renderLogs() {
-  const tbody = document.querySelector('#logTable tbody');
-  const term = logSearchTerm.toLowerCase();
-  const rows = lastLogs.filter((r) => !term
-    || r.broker_name.toLowerCase().includes(term)
-    || r.party_name.toLowerCase().includes(term)
-    || (r.buyer_name || '').toLowerCase().includes(term)
-    || (r.phone || '').includes(term));
+// Pure row-HTML builder shared by the Messages and Archive tables - the only
+// difference between the two lists is which rows they're given, never how a
+// row is drawn.
+function logRowHtml(r, { waReady, canSelect, selected }) {
+  const disabledAttr = waReady ? '' : 'disabled title="Connect WhatsApp before sending"';
+  const note = r.error || r.reconciliation_note || '';
+  const actions = [`<button class="view-link" data-view="${r.id}" type="button">View</button>`];
+  if (EDITABLE_STATUSES.has(r.status)) actions.push(`<button class="btn btn-sm" data-edit="${r.id}" type="button">Edit</button>`);
+  if (r.status === 'draft') actions.push(`<button class="btn btn-sm btn-primary" data-send="${r.id}" type="button" ${disabledAttr}>Send</button>`);
+  if (r.status === 'failed') actions.push(`<button class="btn btn-sm btn-gold" data-retry="${r.id}" type="button" ${disabledAttr}>Retry</button>`);
 
-  if (!lastLogs.length) {
-    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><span class="big">—</span>No messages yet. Drop today's Excel file into <code>incoming/</code> to get started.</div></td></tr>`;
-    updateBulkBar();
-    return;
-  }
-  if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">Nothing matches "${escapeHtml(logSearchTerm)}".</div></td></tr>`;
-    updateBulkBar();
-    return;
-  }
+  const duplicateTag = r.duplicate_of_id
+    ? ` <span class="tag duplicate-warning" title="Same party/stones already sent or queued to this number as message #${r.duplicate_of_id}">Possible duplicate</span>`
+    : '';
+  const autoTag = r.auto_sent ? ' <span class="tag auto-sent" title="Sent automatically by auto-send">Auto</span>' : '';
 
-  tbody.innerHTML = rows
-    .map((r) => {
-      const disabledAttr = waReady ? '' : 'disabled title="Connect WhatsApp before sending"';
-      // A possible-duplicate row is only ever sendable through its own
-      // Send/Retry button (which prompts an explicit confirm) - never as
-      // part of a bulk selection.
-      const canSelect = SENDABLE_STATUSES.has(r.status) && !r.duplicate_of_id;
-      const note = r.error || r.reconciliation_note || '';
-      const actions = [`<button class="view-link" data-view="${r.id}" type="button">View</button>`];
-      if (EDITABLE_STATUSES.has(r.status)) actions.push(`<button class="btn btn-sm" data-edit="${r.id}" type="button">Edit</button>`);
-      if (r.status === 'draft') actions.push(`<button class="btn btn-sm btn-primary" data-send="${r.id}" type="button" ${disabledAttr}>Send</button>`);
-      if (r.status === 'failed') actions.push(`<button class="btn btn-sm btn-gold" data-retry="${r.id}" type="button" ${disabledAttr}>Retry</button>`);
-
-      const duplicateTag = r.duplicate_of_id
-        ? ` <span class="tag duplicate-warning" title="Same party/stones already sent or queued to this number as message #${r.duplicate_of_id}">Possible duplicate</span>`
-        : '';
-      const autoTag = r.auto_sent ? ' <span class="tag auto-sent" title="Sent automatically by auto-send">Auto</span>' : '';
-
-      return `
+  return `
       <tr class="status-cell-row ${r.status}" data-row-id="${r.id}">
-        <td><input type="checkbox" class="row-check" data-id="${r.id}" aria-label="Select message ${r.id}" ${selectedIds.has(r.id) ? 'checked' : ''} ${canSelect ? '' : 'disabled'} /></td>
+        <td><input type="checkbox" class="row-check" data-id="${r.id}" aria-label="Select message ${r.id}" ${selected ? 'checked' : ''} ${canSelect ? '' : 'disabled'} /></td>
         <td class="tabular">${r.id}</td>
         <td>${escapeHtml(r.demand_date || '')}</td>
         <td class="name-cell" title="${escapeHtml(r.broker_name)}">${escapeHtml(r.broker_name)}</td>
@@ -994,31 +936,26 @@ function renderLogs() {
         <td class="row-actions">${actions.join('')}</td>
       </tr>
     `;
-    })
-    .join('');
+}
 
+// Wires the per-row buttons/checkbox for whichever tbody was just redrawn -
+// shared by both the Messages and Archive controllers below.
+function bindLogRowListeners(tbody, { onToggleSelect, onSend, onRetry, onView, onEdit }) {
   tbody.querySelectorAll('.row-check').forEach((box) => {
-    box.addEventListener('change', () => {
-      const id = Number(box.dataset.id);
-      if (box.checked) selectedIds.add(id); else selectedIds.delete(id);
-      updateBulkBar();
-    });
+    box.addEventListener('change', () => onToggleSelect(Number(box.dataset.id), box.checked));
   });
-
   tbody.querySelectorAll('[data-send]').forEach((btn) => {
-    btn.addEventListener('click', () => runSend(btn, btn.dataset.send, '/send', 'Sent'));
+    btn.addEventListener('click', () => onSend(btn, Number(btn.dataset.send)));
   });
   tbody.querySelectorAll('[data-retry]').forEach((btn) => {
-    btn.addEventListener('click', () => runSend(btn, btn.dataset.retry, '/retry', 'Sent'));
+    btn.addEventListener('click', () => onRetry(btn, Number(btn.dataset.retry)));
   });
   tbody.querySelectorAll('[data-view]').forEach((btn) => {
-    btn.addEventListener('click', () => openViewModal(Number(btn.dataset.view)));
+    btn.addEventListener('click', () => onView(Number(btn.dataset.view)));
   });
   tbody.querySelectorAll('[data-edit]').forEach((btn) => {
-    btn.addEventListener('click', () => openEditModal(Number(btn.dataset.edit)));
+    btn.addEventListener('click', () => onEdit(Number(btn.dataset.edit)));
   });
-
-  updateBulkBar();
 }
 
 async function postSend(id, path, confirmDuplicate) {
@@ -1032,7 +969,7 @@ async function postSend(id, path, confirmDuplicate) {
   return { res, data };
 }
 
-async function runSend(btn, id, path, successLabel) {
+async function runSend(btn, id, path, successLabel, controller) {
   btn.disabled = true;
   const original = btn.textContent;
   btn.innerHTML = '<span class="spinner"></span>';
@@ -1054,45 +991,9 @@ async function runSend(btn, id, path, successLabel) {
 
   if (!res.ok) showToast(data.error || 'Send failed', 'error');
   else showToast(`${successLabel} to the broker on WhatsApp`, 'success');
-  refreshLogs();
+  void controller.refresh();
   refreshStatus();
 }
-
-document.getElementById('logSearch').addEventListener('input', (e) => {
-  logSearchTerm = e.target.value;
-  renderLogs();
-});
-
-document.querySelectorAll('#statusTabs button[data-status]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('#statusTabs button[data-status]').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentStatusFilter = btn.dataset.status;
-    refreshLogs();
-  });
-});
-
-document.getElementById('exportBtn').addEventListener('click', () => {
-  window.location.href = '/api/logs/export';
-});
-
-document.getElementById('selectAllCheckbox').addEventListener('change', (e) => {
-  const term = logSearchTerm.toLowerCase();
-  const visible = lastLogs.filter((r) => SENDABLE_STATUSES.has(r.status) && !r.duplicate_of_id && (
-    !term
-    || r.broker_name.toLowerCase().includes(term)
-    || r.party_name.toLowerCase().includes(term)
-    || (r.phone || '').includes(term)
-  ));
-  visible.forEach((r) => { if (e.target.checked) selectedIds.add(r.id); else selectedIds.delete(r.id); });
-  renderLogs();
-});
-
-document.getElementById('selectAllBtn').addEventListener('click', () => {
-  lastLogs.filter((r) => r.status === 'draft' && !r.duplicate_of_id).forEach((r) => selectedIds.add(r.id));
-  renderLogs();
-  showToast(`Selected ${selectedIds.size} draft(s) ready to send`, 'success');
-});
 
 // Bulk sends never bypass the duplicate-confirmation gate - a flagged row
 // always comes back with `duplicate: true` instead of being sent silently.
@@ -1106,50 +1007,249 @@ function summarizeBulkSendResults(results) {
   return { message: parts.join(', '), type: (duplicateCount || otherFailCount) ? 'error' : 'success' };
 }
 
-document.getElementById('sendSelectedBtn').addEventListener('click', async () => {
-  const ids = [...selectedIds];
-  if (!ids.length) return;
-  const btn = document.getElementById('sendSelectedBtn');
-  const originalHtml = btn.innerHTML; // includes the #selectedCount span - must come back after
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Sending…';
-  try {
-    const res = await fetch('/api/logs/send-bulk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids }),
-    });
-    const data = await res.json();
-    const { message, type } = summarizeBulkSendResults(data.results || []);
-    showToast(message, type);
-    selectedIds.clear();
-  } finally {
-    // Restore the button's original markup (its #selectedCount span) before
-    // refreshLogs()/updateBulkBar() tries to update that span - otherwise
-    // it no longer exists (destroyed by the innerHTML overwrite above) and
-    // the button is left stuck showing "Sending…" forever.
-    btn.innerHTML = originalHtml;
-    refreshLogs();
-    refreshStatus();
+// One controller instance per table (Messages, Archive) - each owns its own
+// selection/search/status-filter/last-seen-status state so the two lists
+// never interfere with each other, while sharing every rendering/wiring
+// helper above. `archived` picks which side of the archived_at split this
+// controller's table shows; the rest of the options are just this
+// instance's own DOM element ids (any bulk id left out is simply not wired).
+function createLogListController({
+  archived, tableId, tabsId, searchId, selectAllCheckboxId, selectAllBtnId,
+  sendSelectedBtnId, selectedCountId, sendAllDraftsBtnId, exportBtnId, emptyMessage,
+}) {
+  let logs = [];
+  let statusFilter = '';
+  let searchTerm = '';
+  const selectedIds = new Set();
+  const lastKnownStatus = new Map();
+
+  function tbody() { return document.querySelector(`#${tableId} tbody`); }
+
+  function updateBulkBar() {
+    if (selectedCountId) document.getElementById(selectedCountId).textContent = selectedIds.size;
+    const tip = waReady ? '' : 'Connect WhatsApp before sending';
+    if (sendSelectedBtnId) {
+      const btn = document.getElementById(sendSelectedBtnId);
+      btn.disabled = selectedIds.size === 0 || !waReady;
+      btn.title = tip;
+    }
+    if (sendAllDraftsBtnId) {
+      const btn = document.getElementById(sendAllDraftsBtnId);
+      btn.disabled = !waReady;
+      btn.title = tip;
+    }
   }
+
+  function flashRow(id, status) {
+    const row = document.querySelector(`#${tableId} tbody tr[data-row-id="${id}"]`);
+    if (!row) return;
+    const cls = status === 'sent' ? 'flash-success' : 'flash-failed';
+    row.classList.add(cls);
+    setTimeout(() => row.classList.remove(cls), 1600);
+  }
+
+  function render() {
+    const body = tbody();
+    const term = searchTerm.toLowerCase();
+    const rows = logs.filter((r) => !term
+      || r.broker_name.toLowerCase().includes(term)
+      || r.party_name.toLowerCase().includes(term)
+      || (r.buyer_name || '').toLowerCase().includes(term)
+      || (r.phone || '').includes(term));
+
+    if (!logs.length) {
+      body.innerHTML = `<tr><td colspan="11"><div class="empty-state"><span class="big">—</span>${emptyMessage}</div></td></tr>`;
+      updateBulkBar();
+      return;
+    }
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="11"><div class="empty-state">Nothing matches "${escapeHtml(searchTerm)}".</div></td></tr>`;
+      updateBulkBar();
+      return;
+    }
+
+    body.innerHTML = rows
+      // A possible-duplicate row is only ever sendable through its own
+      // Send/Retry button (which prompts an explicit confirm) - never as
+      // part of a bulk selection.
+      .map((r) => logRowHtml(r, {
+        waReady,
+        canSelect: SENDABLE_STATUSES.has(r.status) && !r.duplicate_of_id,
+        selected: selectedIds.has(r.id),
+      }))
+      .join('');
+
+    bindLogRowListeners(body, {
+      onToggleSelect: (id, checked) => {
+        if (checked) selectedIds.add(id); else selectedIds.delete(id);
+        updateBulkBar();
+      },
+      onSend: (btn, id) => runSend(btn, id, '/send', 'Sent', controller),
+      onRetry: (btn, id) => runSend(btn, id, '/retry', 'Sent', controller),
+      onView: (id) => openViewModal(controller.getRow(id), controller),
+      onEdit: (id) => openEditModal(controller.getRow(id), controller),
+    });
+
+    updateBulkBar();
+  }
+
+  async function refresh() {
+    const params = new URLSearchParams();
+    params.set('archived', archived ? 'true' : 'false');
+    if (statusFilter) params.set('status', statusFilter);
+    const res = await fetch(`/api/logs?${params.toString()}`);
+    const newLogs = await res.json();
+
+    const transitions = [];
+    for (const row of newLogs) {
+      const prev = lastKnownStatus.get(row.id);
+      if (prev && prev !== row.status && FLASH_ON_STATUSES.has(row.status)) {
+        transitions.push({ id: row.id, status: row.status });
+      }
+      lastKnownStatus.set(row.id, row.status);
+    }
+
+    logs = newLogs;
+    const liveIds = new Set(logs.map((r) => r.id));
+    const sendableIds = new Set(logs.filter((row) => SENDABLE_STATUSES.has(row.status)).map((row) => row.id));
+    [...selectedIds].forEach((id) => {
+      if (!liveIds.has(id) || !sendableIds.has(id)) selectedIds.delete(id);
+    });
+    render();
+    transitions.forEach(({ id, status }) => flashRow(id, status));
+  }
+
+  const controller = {
+    refresh,
+    getRow: (id) => logs.find((r) => r.id === id),
+  };
+
+  document.getElementById(searchId).addEventListener('input', (e) => {
+    searchTerm = e.target.value;
+    render();
+  });
+
+  document.querySelectorAll(`#${tabsId} button[data-status]`).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll(`#${tabsId} button[data-status]`).forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      statusFilter = btn.dataset.status;
+      void refresh();
+    });
+  });
+
+  if (exportBtnId) {
+    document.getElementById(exportBtnId).addEventListener('click', () => {
+      window.location.href = '/api/logs/export';
+    });
+  }
+
+  if (selectAllCheckboxId) {
+    document.getElementById(selectAllCheckboxId).addEventListener('change', (e) => {
+      const term = searchTerm.toLowerCase();
+      const visible = logs.filter((r) => SENDABLE_STATUSES.has(r.status) && !r.duplicate_of_id && (
+        !term
+        || r.broker_name.toLowerCase().includes(term)
+        || r.party_name.toLowerCase().includes(term)
+        || (r.phone || '').includes(term)
+      ));
+      visible.forEach((r) => { if (e.target.checked) selectedIds.add(r.id); else selectedIds.delete(r.id); });
+      render();
+    });
+  }
+
+  if (selectAllBtnId) {
+    document.getElementById(selectAllBtnId).addEventListener('click', () => {
+      logs.filter((r) => r.status === 'draft' && !r.duplicate_of_id).forEach((r) => selectedIds.add(r.id));
+      render();
+      showToast(`Selected ${selectedIds.size} draft(s) ready to send`, 'success');
+    });
+  }
+
+  if (sendSelectedBtnId) {
+    document.getElementById(sendSelectedBtnId).addEventListener('click', async () => {
+      const ids = [...selectedIds];
+      if (!ids.length) return;
+      const btn = document.getElementById(sendSelectedBtnId);
+      const originalHtml = btn.innerHTML; // includes the count span - must come back after
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Sending…';
+      try {
+        const res = await fetch('/api/logs/send-bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        });
+        const data = await res.json();
+        const { message, type } = summarizeBulkSendResults(data.results || []);
+        showToast(message, type);
+        selectedIds.clear();
+      } finally {
+        // Restore the button's original markup (its count span) before
+        // refresh()/updateBulkBar() tries to update that span - otherwise it
+        // no longer exists (destroyed by the innerHTML overwrite above) and
+        // the button is left stuck showing "Sending…" forever.
+        btn.innerHTML = originalHtml;
+        void refresh();
+        refreshStatus();
+      }
+    });
+  }
+
+  if (sendAllDraftsBtnId) {
+    document.getElementById(sendAllDraftsBtnId).addEventListener('click', async () => {
+      const btn = document.getElementById(sendAllDraftsBtnId);
+      btn.disabled = true;
+      const originalText = btn.textContent;
+      btn.innerHTML = '<span class="spinner"></span> Sending…';
+      const res = await fetch('/api/logs/send-all-drafts', { method: 'POST' });
+      const data = await res.json();
+      btn.disabled = false;
+      btn.textContent = originalText;
+      if (!data.results || !data.results.length) showToast('No drafts ready to send', 'info');
+      else {
+        const { message, type } = summarizeBulkSendResults(data.results);
+        showToast(message, type);
+      }
+      void refresh();
+      refreshStatus();
+    });
+  }
+
+  return controller;
+}
+
+const messagesLogController = createLogListController({
+  archived: false,
+  tableId: 'logTable',
+  tabsId: 'statusTabs',
+  searchId: 'logSearch',
+  selectAllCheckboxId: 'selectAllCheckbox',
+  selectAllBtnId: 'selectAllBtn',
+  sendSelectedBtnId: 'sendSelectedBtn',
+  selectedCountId: 'selectedCount',
+  sendAllDraftsBtnId: 'sendAllDraftsBtn',
+  exportBtnId: 'exportBtn',
+  emptyMessage: `No messages yet. Drop today's Excel file into <code>incoming/</code> to get started.`,
 });
 
-document.getElementById('sendAllDraftsBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('sendAllDraftsBtn');
-  btn.disabled = true;
-  const originalText = btn.textContent;
-  btn.innerHTML = '<span class="spinner"></span> Sending…';
-  const res = await fetch('/api/logs/send-all-drafts', { method: 'POST' });
-  const data = await res.json();
-  btn.disabled = false;
-  btn.textContent = originalText;
-  if (!data.results || !data.results.length) showToast('No drafts ready to send', 'info');
-  else {
-    const { message, type } = summarizeBulkSendResults(data.results);
-    showToast(message, type);
-  }
-  refreshLogs();
-  refreshStatus();
+// Archive keeps every row fully viewable/editable/sendable (archived_at never
+// affects send-eligibility), but deliberately has no "select all drafts" or
+// "send all drafts" bulk convenience - those imply "the current working
+// batch," which an archived batch by definition no longer is. An explicit,
+// per-row or manually-checked multi-select send is still available.
+const archiveLogController = createLogListController({
+  archived: true,
+  tableId: 'archiveLogTable',
+  tabsId: 'archiveStatusTabs',
+  searchId: 'archiveLogSearch',
+  selectAllCheckboxId: 'archiveSelectAllCheckbox',
+  selectAllBtnId: null,
+  sendSelectedBtnId: 'archiveSendSelectedBtn',
+  selectedCountId: 'archiveSelectedCount',
+  sendAllDraftsBtnId: null,
+  exportBtnId: null,
+  emptyMessage: 'Nothing archived yet. Sent messages and superseded imports will show up here.',
 });
 
 // ---------- Modal: View (read-only) ----------
@@ -1164,8 +1264,7 @@ function metaBlock(row) {
   `;
 }
 
-function openViewModal(id) {
-  const row = lastLogs.find((r) => r.id === id);
+function openViewModal(row, controller) {
   if (!row) return;
   document.getElementById('modalTitle').textContent = 'Message — original';
   const edited = row.original_message && row.message !== row.original_message;
@@ -1189,12 +1288,12 @@ function openViewModal(id) {
   `;
   document.getElementById('modalBackdrop').classList.add('open');
   if (row.status === 'send_uncertain') {
-    document.getElementById('uncertainDeliveredBtn').addEventListener('click', (event) => reconcileUncertain(row.id, 'sent', event.currentTarget));
-    document.getElementById('uncertainRetryBtn').addEventListener('click', (event) => reconcileUncertain(row.id, 'retry', event.currentTarget));
+    document.getElementById('uncertainDeliveredBtn').addEventListener('click', (event) => reconcileUncertain(row.id, 'sent', event.currentTarget, controller));
+    document.getElementById('uncertainRetryBtn').addEventListener('click', (event) => reconcileUncertain(row.id, 'retry', event.currentTarget, controller));
   }
 }
 
-async function reconcileUncertain(id, decision, button) {
+async function reconcileUncertain(id, decision, button, controller) {
   const wording = decision === 'sent'
     ? 'Confirm that you personally checked WhatsApp and this exact message is present in the broker chat.'
     : 'Confirm that you personally checked WhatsApp and this exact message is absent. This will enable one explicit retry.';
@@ -1214,7 +1313,7 @@ async function reconcileUncertain(id, decision, button) {
     if (!res.ok) throw new Error(data.error || 'The verification result could not be saved.');
     closeModal();
     showToast(decision === 'sent' ? 'Verified and marked as sent' : 'Verified as not delivered; Retry is now available', 'success');
-    await Promise.all([refreshLogs(), refreshStatus()]);
+    await Promise.all([controller.refresh(), refreshStatus()]);
   } catch (error) {
     const target = document.getElementById('uncertainError');
     if (target) {
@@ -1227,9 +1326,9 @@ async function reconcileUncertain(id, decision, button) {
 }
 
 // ---------- Modal: Edit ----------
-function openEditModal(id) {
-  const row = lastLogs.find((r) => r.id === id);
+function openEditModal(row, controller) {
   if (!row) return;
+  const id = row.id;
   document.getElementById('modalTitle').textContent = 'Edit draft';
   document.getElementById('modalBody').innerHTML = `
     <div class="field-group">
@@ -1273,7 +1372,7 @@ function openEditModal(id) {
     if (res.ok) {
       showToast('Draft updated', 'success');
       closeModal();
-      refreshLogs();
+      void controller.refresh();
       refreshStatus();
     } else {
       showToast('Could not save changes', 'error');
@@ -1331,7 +1430,11 @@ document.getElementById('uploadBtn').addEventListener('click', async () => {
     showToast('File queued for processing', 'success');
     input.value = '';
     renderSelectedUploadFile();
-    setTimeout(() => { refreshLogs(); refreshStatus(); }, 1500);
+    setTimeout(() => {
+      void messagesLogController.refresh();
+      void archiveLogController.refresh();
+      refreshStatus();
+    }, 1500);
   } catch (error) {
     msgEl.className = 'upload-message error';
     msgEl.textContent = error.message || 'Upload failed. Please try again.';
@@ -2029,9 +2132,14 @@ function tick() {
   tickInFlight = (async () => {
     do {
       tickRequestedAgain = false;
-      // Status first: renderLogs/updateBulkBar read waReady.
+      // Status first: render()/updateBulkBar (inside each log controller) reads waReady.
       const wa = await refreshStatus();
-      await Promise.allSettled([refreshBackupStatus(), refreshLogs(), refreshBrokers()]);
+      await Promise.allSettled([
+        refreshBackupStatus(),
+        messagesLogController.refresh(),
+        archiveLogController.refresh(),
+        refreshBrokers(),
+      ]);
       await maybePromptSetupWizard(wa);
     } while (tickRequestedAgain);
   })().finally(() => { tickInFlight = null; });

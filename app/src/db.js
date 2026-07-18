@@ -62,7 +62,9 @@ async function init() {
   ensureColumn('content_signature', 'TEXT');
   ensureColumn('duplicate_of_id', 'INTEGER');
   ensureColumn('auto_sent', 'INTEGER');
+  ensureColumn('archived_at', 'TEXT');
   db.exec('CREATE INDEX IF NOT EXISTS idx_messages_content_signature ON messages_log(content_signature);');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_messages_archived_at ON messages_log(archived_at);');
 
   // If the process exited after handing a message to WhatsApp but before the
   // final DB commit, delivery is unknowable. Keep that row locked instead of
@@ -220,7 +222,8 @@ async function markSent(id, waMessageId, options = {}) {
   const info = db.prepare(`
     UPDATE messages_log
     SET status = 'sent', error = NULL, sent_at = datetime('now'), send_started_at = NULL,
-        wa_message_id = ?, delivery_status = 'sent', auto_sent = ?
+        wa_message_id = ?, delivery_status = 'sent', auto_sent = ?,
+        archived_at = COALESCE(archived_at, datetime('now'))
     WHERE id = ? AND status = 'sending'
   `).run(waMessageId || null, options.auto === true ? 1 : 0, id);
   return Number(info.changes) === 1;
@@ -273,7 +276,8 @@ async function reconcileUncertainMessage(id, decision) {
           wa_message_id = NULL,
           delivery_status = 'sent',
           reconciled_at = datetime('now'),
-          reconciliation_note = 'Operator verified in the broker chat that this interrupted message was delivered.'
+          reconciliation_note = 'Operator verified in the broker chat that this interrupted message was delivered.',
+          archived_at = COALESCE(archived_at, datetime('now'))
       WHERE id = ? AND status = 'send_uncertain'
     `).run(id);
   } else {
@@ -295,11 +299,31 @@ async function reconcileUncertainMessage(id, decision) {
   return getMessage(id);
 }
 
-async function listMessages({ status } = {}) {
+// Called once a new import has finished inserting its own rows. Sweeps every
+// OTHER not-yet-archived row (any status) into the archive, so the main list
+// always shows only the latest import - never a mix of it and older
+// leftovers. Guard on insertedIds.length before calling this: an empty list
+// (e.g. a fully-duplicate re-upload) must never blank the whole main list.
+async function archiveAllExceptIds(ids) {
+  if (!ids.length) return 0;
+  const placeholders = ids.map(() => '?').join(',');
+  const info = db.prepare(
+    `UPDATE messages_log SET archived_at = datetime('now') WHERE archived_at IS NULL AND id NOT IN (${placeholders})`,
+  ).run(...ids);
+  return Number(info.changes);
+}
+
+async function listMessages({ status, archived } = {}) {
+  const clauses = [];
+  const params = [];
   if (status) {
-    return db.prepare('SELECT * FROM messages_log WHERE status = ? ORDER BY id DESC').all(status);
+    clauses.push('status = ?');
+    params.push(status);
   }
-  return db.prepare('SELECT * FROM messages_log ORDER BY id DESC').all();
+  if (archived === true) clauses.push('archived_at IS NOT NULL');
+  else if (archived === false) clauses.push('archived_at IS NULL');
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  return db.prepare(`SELECT * FROM messages_log ${where} ORDER BY id DESC`).all(...params);
 }
 
 async function getMessage(id) {
@@ -322,6 +346,18 @@ async function counts() {
   return out;
 }
 
+// A new import sweeping an unresolved failed/send_uncertain row into Archive
+// (per the operator's own confirmed requirement) must never make that row
+// silently disappear - this surfaces it as a small badge on the Archive nav
+// item specifically, distinct from the main "Attention" tile (which already
+// stays unscoped and still counts it too).
+async function archivedAttentionCount() {
+  const row = db.prepare(
+    `SELECT COUNT(*) as n FROM messages_log WHERE archived_at IS NOT NULL AND status IN ('failed', 'send_uncertain')`,
+  ).get();
+  return Number(row?.n || 0);
+}
+
 module.exports = {
   db,
   DATA_DIR: dbDir,
@@ -339,6 +375,8 @@ module.exports = {
   markSendUncertain,
   reconcileUncertainMessage,
   setDeliveryStatusByWaId,
+  archiveAllExceptIds,
+  archivedAttentionCount,
   listMessages,
   getMessage,
   getSetting,

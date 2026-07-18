@@ -118,7 +118,9 @@ async function ingestFile(filePath, whatsappService) {
           partyName: g.partyName,
           buyerName: g.buyerName,
           phone,
-          message: g.message || '(no message - broker name missing in source sheet)',
+          // Defensive-only fallback: excelParser.js always renders a full
+          // message now, so this should practically never trigger.
+          message: g.message || '(no message could be generated for this row)',
           stoneCount: g.stoneCount,
           attachmentPath,
           validationError: attachmentError,
@@ -144,6 +146,15 @@ async function ingestFile(filePath, whatsappService) {
     }
 
     const processedPath = moveFileExclusive(filePath, PROCESSED_DIR, uniqueImportName(fileName));
+
+    // Guarded on insertedCount > 0 so a fully-duplicate re-upload (0 new rows)
+    // can never blank the main list - only a genuinely new import narrows it
+    // down to just its own rows. Every other not-yet-archived row (regardless
+    // of status - draft, needs_info, failed, send_uncertain) moves to Archive,
+    // per the operator's own confirmed requirement that the main list should
+    // only ever show the latest import.
+    if (insertedCount > 0) await db.archiveAllExceptIds(insertedIds);
+
     bus.emit('update');
     bus.emit('import-summary', {
       fileName, insertedCount, duplicateSkippedCount, contentDuplicateCount, ok: true, error: null,
@@ -194,7 +205,10 @@ async function sendMessagesByIds(ids, whatsappService, options = {}) {
 }
 
 async function sendAllDrafts(whatsappService) {
-  const drafts = await db.listMessages({ status: 'draft' });
+  // Scoped to the not-yet-archived batch only - a stale, already-archived
+  // draft from an older import must never be resurrected by this bulk action.
+  // A single row's own explicit Send/Retry is unaffected by archived_at.
+  const drafts = await db.listMessages({ status: 'draft', archived: false });
   return sendMessagesByIds(drafts.map((r) => r.id), whatsappService);
 }
 

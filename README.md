@@ -8,12 +8,12 @@ Broker Demand Desk is a self-contained Windows application that converts a daily
 
 | Item | Value |
 | --- | --- |
-| Version | `1.4.0` |
-| Installer | [`installer/output/BrokerDemandDesk-Setup-1.4.0.exe`](installer/output/BrokerDemandDesk-Setup-1.4.0.exe) |
-| SHA-256 | `EA8F5C000C386DA66BB868F1F4DDC87D5BBEBC53B5C1442685786A0E400F56A2` |
+| Version | `1.5.0` |
+| Installer | [`installer/output/BrokerDemandDesk-Setup-1.5.0.exe`](installer/output/BrokerDemandDesk-Setup-1.5.0.exe) |
+| SHA-256 | `5D7D59862E02FB23DAFC7CE9A256921ED276A6A094C2A53856F78B7EACBAF84D` |
 | Platform | Windows 10/11 x64 |
 | Runtime | Bundled Node.js and Chromium; no separate Node, Docker or database installation required |
-| Test status | 109 automated tests passing, plus desktop/mobile browser verification |
+| Test status | 120 automated tests passing, plus desktop/mobile browser verification |
 
 The installer is not currently code-signed, so Windows can display an **Unknown Publisher** warning. Verify the SHA-256 checksum before distribution.
 
@@ -33,7 +33,8 @@ The installer is not currently code-signed, so Windows can display an **Unknown 
 - Creates independent scheduled database backups using `year/month` folders.
 - Lets every PC choose its own daily backup time.
 - Includes safe restart/watchdog behavior and persistent browser login sessions.
-- Guides first-time setup with a Setup Wizard (column mapping, message template, backups), with a sidebar-organized dashboard (Dashboard, Messages, Brokers, Backups, Settings) for everyday use.
+- Guides first-time setup with a Setup Wizard (column mapping, message template, backups), with a sidebar-organized dashboard (Dashboard, Messages, Archive, Brokers, Backups, Settings) for everyday use.
+- Keeps the Messages list narrowed to the latest import: uploading a new workbook automatically moves every earlier row to the Archive page, and a sent message moves there immediately too — archived rows stay fully viewable, editable and sendable.
 
 ## End-to-end product flow
 
@@ -63,9 +64,10 @@ Every supported operational flow is assigned a stable identifier and documented 
 | --- | --- |
 | Installation and lifecycle | `LIFE-001` to `LIFE-004` |
 | Authentication and recovery | `AUTH-001` to `AUTH-005` |
-| WhatsApp connection | `WA-001` to `WA-006` |
+| WhatsApp connection | `WA-001` to `WA-007` |
 | Workbook import | `IMP-001` to `IMP-006` |
-| Broker and draft management | `DRAFT-001` to `DRAFT-004` |
+| Broker and draft management | `DRAFT-001` to `DRAFT-005` |
+| Archive | `ARCHIVE-001` to `ARCHIVE-002` |
 | Sending and delivery safety | `SEND-001` to `SEND-007` |
 | Backups | `BACKUP-001` to `BACKUP-005` |
 | Interface and diagnostics | `UI-001` to `UI-004` |

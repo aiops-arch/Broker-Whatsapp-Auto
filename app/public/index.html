@@ -38,6 +38,11 @@
       <span>Messages</span>
       <span class="nav-badge" id="navAttentionBadge" hidden>0</span>
     </button>
+    <button class="nav-item" type="button" data-view="archive">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 4h16v4.5H4V4Z"/><path d="M5 8.5h14V20H5V8.5Z"/><path d="M9.5 12.5h5"/></svg>
+      <span>Archive</span>
+      <span class="nav-badge" id="navArchiveBadge" hidden>0</span>
+    </button>
     <button class="nav-item" type="button" data-view="brokers">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>
       <span>Brokers</span>
@@ -114,7 +119,6 @@
             <button data-status="" class="active">All</button>
             <button data-status="needs_info">Needs info</button>
             <button data-status="draft">Draft</button>
-            <button data-status="sent">Sent</button>
             <button data-status="failed">Failed</button>
             <button data-status="send_uncertain">Verify</button>
           </div>
@@ -133,6 +137,44 @@
           <table id="logTable">
             <thead>
               <tr><th class="chk-col"><input type="checkbox" id="selectAllCheckbox" aria-label="Select all sendable messages" /></th><th>#</th><th>Date</th><th>Broker</th><th>Party</th><th>Buyer</th><th>Phone</th><th>Stones</th><th>Status</th><th>Note</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" data-view="archive" id="view-archive">
+      <div class="view-header">
+        <h2>Archive</h2>
+        <p class="muted">Every earlier import and every sent message lands here automatically. Rows stay fully viewable, editable, and sendable.</p>
+      </div>
+
+      <div class="card log-card">
+        <div class="card-head">
+          <h2>Archived Messages</h2>
+        </div>
+        <div class="toolbar">
+          <div class="tabs" id="archiveStatusTabs">
+            <button data-status="" class="active">All</button>
+            <button data-status="needs_info">Needs info</button>
+            <button data-status="draft">Draft</button>
+            <button data-status="sent">Sent</button>
+            <button data-status="failed">Failed</button>
+            <button data-status="send_uncertain">Verify</button>
+          </div>
+          <div class="search-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input type="search" id="archiveLogSearch" placeholder="Search broker, party, phone…" />
+          </div>
+        </div>
+        <div class="toolbar bulk-toolbar">
+          <button class="btn btn-sm btn-primary" id="archiveSendSelectedBtn" type="button" disabled>Send selected (<span id="archiveSelectedCount">0</span>)</button>
+        </div>
+        <div class="table-scroll">
+          <table id="archiveLogTable">
+            <thead>
+              <tr><th class="chk-col"><input type="checkbox" id="archiveSelectAllCheckbox" aria-label="Select all sendable archived messages" /></th><th>#</th><th>Date</th><th>Broker</th><th>Party</th><th>Buyer</th><th>Phone</th><th>Stones</th><th>Status</th><th>Note</th><th></th></tr>
             </thead>
             <tbody></tbody>
           </table>

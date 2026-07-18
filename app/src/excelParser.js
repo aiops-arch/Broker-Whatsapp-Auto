@@ -157,7 +157,14 @@ async function parseWorkbook(filePath) {
       ? messageConfig.renderTemplate(template.buyerLineTemplate, data)
       : '';
 
-    const message = brokerName ? messageConfig.renderTemplate(template.headerTemplate, data) : '';
+    // Always render the full message - even when the broker name is blank,
+    // so the real party/stone/buyer details are never silently discarded.
+    // {{brokerName}} just renders as an empty string via renderTemplate's
+    // existing null/empty fallback, producing an honest blank greeting
+    // ("Dear ,") rather than losing all the demand details it took to
+    // compute. An operator assigning a broker later via Edit only needs to
+    // fix the greeting line, never reconstruct the whole message by hand.
+    const message = messageConfig.renderTemplate(template.headerTemplate, data);
 
     const perRowDedup = g.lineRows
       .map((rowValues) => dedupLineFields.map((f) => rowValues[f.key]).join('|'))

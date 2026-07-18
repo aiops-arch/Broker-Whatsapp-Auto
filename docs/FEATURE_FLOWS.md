@@ -169,6 +169,15 @@ Safety rules that apply to every flow:
 - **Failure/recovery:** Reset refuses a ready account and refuses linked/junction paths.
 - **Persistence:** Only contained incomplete LocalAuth data is removed.
 
+### WA-007 — Bounded automatic reconnect on a live disconnect
+
+- **Trigger:** A ready WhatsApp client emits `disconnected` for any reason other than an explicit phone-initiated logout.
+- **Prerequisites:** Provider previously reached `ready`.
+- **Flow:** The library only deletes the saved `LocalAuth` session on the `'LOGOUT'` reason; every other reason (a connection hiccup, network blip, etc.) leaves it intact. The provider retries a silent probe restart, up to a bounded number of attempts with a short delay between them, instead of immediately demanding a manual re-link.
+- **Success:** A transient disconnect recovers on its own; the operator sees a brief "reconnecting automatically" status instead of being dropped to setup.
+- **Failure/recovery:** An explicit `'LOGOUT'` reason still fully retires the client and asks the operator to re-link, unchanged from before. Exceeding the retry cap falls back to the same manual re-link request.
+- **Persistence:** None beyond in-memory retry-attempt state; the `LocalAuth` profile itself is untouched by this flow.
+
 ---
 
 ## Workbook import
@@ -267,6 +276,37 @@ Safety rules that apply to every flow:
 - **Failure/recovery:** The flag is informational and permanent - it is never auto-cleared. See `SEND-007` for how a flagged row is actually sent.
 - **Persistence:** `content_signature` and `duplicate_of_id` on the new `messages_log` row.
 
+### DRAFT-005 — Message regenerated even without a known broker
+
+- **Trigger:** A workbook row's broker-name field is blank at import time.
+- **Prerequisites:** None - applies to every import.
+- **Flow:** The message is always rendered from the full row data (party, stones, buyer); only the greeting line is left blank (`Dear ,`). The broker/party/stone/buyer details are never discarded just because the broker is unknown.
+- **Success:** The draft contains the complete demand; assigning a broker later via `DRAFT-003` only ever needs to fix the greeting, never reconstruct the message by hand.
+- **Failure/recovery:** Rows imported before this behavior shipped keep whatever placeholder text they already had - this only changes generation for new imports.
+- **Persistence:** None beyond the normal `messages_log` row from `DRAFT-002`.
+
+---
+
+## Archive
+
+### ARCHIVE-001 — New import sweeps the previous batch to Archive
+
+- **Trigger:** A workbook import inserts one or more new rows (`IMP-001`/`IMP-002`).
+- **Prerequisites:** At least one row was actually inserted by this import (a fully-duplicate re-upload that inserts nothing changes nothing).
+- **Flow:** Every not-yet-archived row other than this import's own new rows - regardless of status (`draft`, `needs_info`, `failed`, `send_uncertain`) - is archived in one pass.
+- **Success:** The main Messages list always shows only the latest import; everything earlier is fully viewable/editable/sendable from the new Archive page.
+- **Failure/recovery:** An unresolved `failed`/`send_uncertain` row from an older import can be swept into Archive without being resolved - this is a deliberate, accepted trade-off, surfaced as a small badge on the Archive nav item so it is never silently lost. The unscoped Dashboard "Attention" tile also keeps counting it.
+- **Persistence:** `archived_at` timestamp set on every swept row.
+
+### ARCHIVE-002 — Sending archives a row immediately
+
+- **Trigger:** A row transitions to `sent` (`SEND-001` through `SEND-003`, `IMP-005`) or is reconciled as delivered (`SEND-006`).
+- **Prerequisites:** None.
+- **Flow:** The same update that marks the row `sent` also sets `archived_at` (preserving an earlier archive timestamp via `COALESCE` if the row was already swept by `ARCHIVE-001` while mid-send).
+- **Success:** A sent row leaves the main Messages list the moment it sends and appears in Archive with its Sent tab.
+- **Failure/recovery:** None - this is a pure state transition with no failure mode of its own.
+- **Persistence:** `archived_at` timestamp.
+
 ---
 
 ## Sending and delivery safety
@@ -293,9 +333,9 @@ Safety rules that apply to every flow:
 
 - **Trigger:** Operator explicitly chooses **Send all drafts**.
 - **Prerequisites:** WhatsApp ready and local drafts available.
-- **Flow:** Snapshot eligible draft IDs and process them through the atomic coordinator with human-like delay.
+- **Flow:** Snapshot eligible draft IDs, scoped to the not-yet-archived batch only (see `ARCHIVE-001`), and process them through the atomic coordinator with human-like delay.
 - **Success:** Eligible drafts are processed once.
-- **Failure/recovery:** Needs-info, sent, sending and uncertain rows remain excluded.
+- **Failure/recovery:** Needs-info, sent, sending and uncertain rows remain excluded; a stale draft already swept into Archive is never resurrected by this bulk action (its own explicit Send/Retry is unaffected).
 - **Persistence:** Per-row send results.
 
 ### SEND-004 — Attachment validation and send
@@ -471,8 +511,8 @@ Safety rules that apply to every flow:
 | --- | --- |
 | `auth-recovery.test.js` | `AUTH-005` |
 | `session-store.test.js` | `AUTH-002`, `AUTH-004` |
-| `whatsapp-provider.test.js` | `WA-001` to `WA-006` |
-| `excel-import.test.js` | `IMP-002`, `IMP-003`, `DRAFT-002`, `CONFIG-002` (default mapping reproduces legacy output byte-for-byte) |
+| `whatsapp-provider.test.js` | `WA-001` to `WA-007` |
+| `excel-import.test.js` | `IMP-002`, `IMP-003`, `DRAFT-002`, `DRAFT-005`, `CONFIG-002` (default mapping reproduces legacy output byte-for-byte) |
 | `message-config.test.js` | `CONFIG-002`, `CONFIG-003` (mapping/template validation and safe rendering) |
 | `config-routes.test.js` | `CONFIG-002`, `CONFIG-003`, `CONFIG-004` |
 | `import-files.test.js` | `IMP-001`, `IMP-004` |
@@ -480,7 +520,8 @@ Safety rules that apply to every flow:
 | `send-safety.test.js` | `SEND-001` to `SEND-003`, `SEND-005` to `SEND-007` |
 | `attachment-policy.test.js` | `SEND-004` |
 | `content-duplicate.test.js` | `DRAFT-004` |
-| `auto-send.test.js` | `IMP-005` |
+| `auto-send.test.js` | `IMP-005`, `ARCHIVE-002` |
+| `archive.test.js` | `ARCHIVE-001`, `ARCHIVE-002` |
 | `backup.test.js` | `BACKUP-001` to `BACKUP-005` |
 | `runtime-logger.test.js` | `UI-004` |
 | `installer-definition.test.js` | `LIFE-001`, `LIFE-002` |

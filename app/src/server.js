@@ -373,7 +373,11 @@ async function main() {
   });
 
   app.get('/api/status', async (req, res) => {
-    res.json({ whatsapp: whatsapp.getStatus(), counts: await db.counts() });
+    res.json({
+      whatsapp: whatsapp.getStatus(),
+      counts: await db.counts(),
+      archivedAttention: await db.archivedAttentionCount(),
+    });
   });
 
   // ---------- Local backups ----------
@@ -579,7 +583,8 @@ async function main() {
 
   app.get('/api/logs', async (req, res) => {
     const { status } = req.query;
-    res.json(await db.listMessages(status ? { status } : {}));
+    const archived = req.query.archived === 'true';
+    res.json(await db.listMessages({ status: status || undefined, archived }));
   });
 
   app.patch('/api/logs/:id', async (req, res) => {

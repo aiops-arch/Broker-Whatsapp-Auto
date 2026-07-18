@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0
+
+- Add a new **Archive** page in the sidebar. Uploading a new workbook now moves every row from earlier imports there automatically (whatever its status), so the main Messages list always shows only the latest import. Sending a message also moves it to Archive immediately. Archived rows stay fully viewable, editable, and sendable.
+- Fix: a row with no broker name in the source sheet previously discarded the entire generated message, sending a bare placeholder instead of the real demand; the full party/stone/buyer details are now always kept, with only the greeting left blank until a broker is assigned.
+- Fix: WhatsApp disconnecting for any reason other than an explicit phone-initiated logout (a brief connection hiccup, network blip, etc.) previously demanded an immediate manual re-link; it now retries a silent reconnect automatically first, falling back to a manual re-link only if that doesn't recover.
+- "Send all drafts" no longer resurrects a stale batch already swept into Archive by a newer import; the per-row Send/Retry action on an archived row is unaffected.
+- An import sweeping an unresolved failed/needs-verification row into Archive (rather than that row being resolved) is now surfaced as a small badge on the Archive sidebar item, so it's never silently lost.
+- Register the new flows (`DRAFT-005`, `WA-007`, `ARCHIVE-001`, `ARCHIVE-002`) in `docs/FEATURE_FLOWS.md`.
+
 ## 1.4.0
 
 - Add a cross-import "possible duplicate" flag: the same party/stones reaching the same phone number from a different import or file is flagged, never silently skipped and never hard-blocked. Sending a flagged row requires one explicit confirmation; bulk sends and auto-send always skip it instead.

@@ -59,6 +59,27 @@ test('the default column mapping and message template render the expected messag
   assert.equal(groups[0].dedupComponentSignature, 'S-1');
 });
 
+test('a row with no broker in the sheet still generates the full message, not a placeholder', async (t) => {
+  const filePath = path.join(tempDirectory(t), 'missing-broker.xlsx');
+  await writeWorkbook(filePath, HEADERS, [[
+    'INV-1', new Date('2026-07-17T00:00:00Z'), 'Example Party', 'S-1', 'R-1',
+    'D', 'VS1', 1.2, '', '', 'Buyer', '',
+  ]]);
+
+  const groups = await parseWorkbook(filePath);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].brokerName, '');
+  assert.equal(groups[0].partyName, 'Example Party');
+  // The demand details must survive even with no broker to address - only
+  // the greeting is blank, never the whole message.
+  assert.equal(
+    groups[0].message,
+    "Dear ,\n\nPlease find today's demand:\n\nParty Name: Example Party\n1) StoneId: S-1 | Report#: R-1 | Color: D | Clarity: VS1 | Cts: 1.20\n\nRegards,\nBuyer",
+  );
+  assert.match(groups[0].message, /Party Name: Example Party/);
+  assert.match(groups[0].message, /StoneId: S-1/);
+});
+
 test('dedupComponentSignature sorts multiple stone ids regardless of row order', async (t) => {
   const filePath = path.join(tempDirectory(t), 'multi-stone.xlsx');
   await writeWorkbook(filePath, HEADERS, [

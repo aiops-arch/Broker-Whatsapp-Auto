@@ -60,6 +60,7 @@ test('when enabled, a complete non-flagged just-imported row sends automatically
     const row = await db.getMessage(id);
     assert.equal(row.status, 'sent');
     assert.equal(row.auto_sent, 1);
+    assert.ok(row.archived_at, 'an auto-sent row archives immediately, same as a manual send');
   } finally {
     await messageConfig.setAutoSendEnabled(false);
   }

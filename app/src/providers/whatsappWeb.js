@@ -14,6 +14,13 @@ const STARTUP_TIMEOUT_MS = 45000;
 const CLIENT_STOP_TIMEOUT_MS = 10000;
 const DIRECT_REFRESH_TIMEOUT_MS = 12000;
 const AUTHENTICATED_READY_TIMEOUT_MS = 120000;
+// Only whatsapp-web.js's explicit phone-initiated LOGOUT path deletes the
+// saved LocalAuth session before disconnecting - every other disconnect
+// reason (a WAState connection hiccup, network blip, etc.) leaves it fully
+// intact, so a bounded silent retry is tried first instead of demanding a
+// manual re-link for what's very likely a transient blip.
+const MAX_AUTO_RECONNECT_ATTEMPTS = 3;
+const AUTO_RECONNECT_DELAY_MS = 4000;
 const RECOVERY_CODE_PATTERN = /^\d{4,10}$/;
 const SELF_CHAT_SERVERS = new Set(['c.us', 'lid']);
 
@@ -93,6 +100,10 @@ class WhatsAppWebProvider extends EventEmitter {
     this._fsPromises = fs.promises;
     this._resetInProgress = false;
     this._refreshInProgress = false;
+    this._autoReconnectAttempts = 0;
+    this._autoReconnectTimer = null;
+    this._autoReconnectDelayMs = AUTO_RECONNECT_DELAY_MS;
+    this._maxAutoReconnectAttempts = MAX_AUTO_RECONNECT_ATTEMPTS;
     this.authDataPath = AUTH_DATA_PATH;
     this.authSessionPath = path.join(this.authDataPath, 'session');
 
@@ -337,6 +348,47 @@ class WhatsAppWebProvider extends EventEmitter {
     void this._stopClient(client);
   }
 
+  // A live disconnect whose LocalAuth session is still intact (anything but
+  // an explicit LOGOUT) gets a bounded number of silent, automatic
+  // reconnect attempts - the same _startClient('probe') mechanism already
+  // used once at startup - before ever asking the operator to manually
+  // re-link for what's very likely a transient blip.
+  _scheduleAutoReconnect(client, generation, detail) {
+    if (!this._isCurrentClient(client, generation)) return;
+    const attempt = (this._autoReconnectAttempts || 0) + 1;
+    this._autoReconnectAttempts = attempt;
+
+    if (attempt > (this._maxAutoReconnectAttempts || MAX_AUTO_RECONNECT_ATTEMPTS)) {
+      this._autoReconnectAttempts = 0;
+      this._retireCurrentClient(
+        client,
+        generation,
+        'disconnected',
+        `WhatsApp disconnected${detail} and could not reconnect automatically. Try linking again with phone code or QR.`,
+      );
+      return;
+    }
+
+    this.client = null;
+    this._generation += 1;
+    this._clearAuthenticatedReadyTimer();
+    this._invalidateQr();
+    this.pairingCode = null;
+    this.lastError = `WhatsApp disconnected${detail}. Reconnecting automatically (attempt ${attempt}/${this._maxAutoReconnectAttempts || MAX_AUTO_RECONNECT_ATTEMPTS})...`;
+    this._emitStatus('starting');
+    void this._stopClient(client);
+
+    this._clearTimer(this._autoReconnectTimer);
+    const delay = this._autoReconnectDelayMs || AUTO_RECONNECT_DELAY_MS;
+    this._autoReconnectTimer = this._setTimer(() => {
+      this._autoReconnectTimer = null;
+      // Superseded by a manual action (reset, disconnect, a fresh setup
+      // attempt) in the meantime - never fight with it.
+      if (this.status !== 'starting' || this.client) return;
+      void this._startClient('probe');
+    }, delay);
+  }
+
   // client.initialize() is a long-running promise. It is intentionally not
   // awaited by setup routes, but every rejection is handled here. The bound
   // client + generation checks prevent an old browser from changing the state
@@ -457,6 +509,7 @@ class WhatsAppWebProvider extends EventEmitter {
       this._invalidateQr();
       this.pairingCode = null;
       this.lastError = null;
+      this._autoReconnectAttempts = 0;
       this._emitStatus('ready');
     });
 
@@ -468,8 +521,26 @@ class WhatsAppWebProvider extends EventEmitter {
 
     client.on('disconnected', (reason) => {
       if (!this._isCurrentClient(client, generation)) return;
-      const detail = reason ? ` (${String(reason)})` : '';
-      this._retireCurrentClient(client, generation, 'disconnected', `WhatsApp disconnected${detail}. Try linking again with phone code or QR.`);
+      const reasonText = reason != null ? String(reason) : '';
+      const detail = reasonText ? ` (${reasonText})` : '';
+
+      if (reasonText === 'LOGOUT') {
+        // The phone explicitly unlinked this device - whatsapp-web.js has
+        // already deleted the LocalAuth session for exactly this case
+        // (Client.js's framenavigated handler calls authStrategy.logout()
+        // before emitting), so a fresh probe would only ever show a new QR.
+        // Re-linking really is required here.
+        this._retireCurrentClient(client, generation, 'disconnected', `WhatsApp disconnected${detail}. Try linking again with phone code or QR.`);
+        return;
+      }
+
+      // Any other reason (a WAState connection hiccup, a transient
+      // connectivity blip) leaves the saved LocalAuth session completely
+      // untouched - whatsapp-web.js's connection-state handler only calls
+      // the LocalAuth authStrategy's no-op disconnect(), never logout(),
+      // for this path. Try a bounded silent reconnect (the same mechanism
+      // used at startup) before ever asking the operator to re-link.
+      this._scheduleAutoReconnect(client, generation, detail);
     });
 
     // Fires whenever a sent message's delivery state changes - lets callers
