@@ -8,7 +8,7 @@
 #   $env:CODESIGN_PFX_PASSWORD = "password"
 
 $ErrorActionPreference = 'Stop'
-$InstallerVersion = '1.5.0'
+$InstallerVersion = '1.5.1'
 $IsccPath = Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'
 $IssPath = Join-Path $PSScriptRoot 'setup.iss'
 $AppRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\app')).Path

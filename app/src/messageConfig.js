@@ -68,9 +68,12 @@ function getDefaultFieldMapping() {
 
 function getDefaultMessageTemplate() {
   return {
-    headerTemplate: "Dear {{brokerName}},\n\nPlease find today's demand:\n\nParty Name: {{partyName}}\n{{lineItems}}\n\nRegards,\n{{buyerName}}",
+    headerTemplate: "Dear {{brokerName}},\n\nPlease find today's demand:\n\nParty Name: {{partyName}}\n{{lineItems}}\n\n{{buyerLine}}",
     lineItemTemplate: '{{index}}) StoneId: {{stoneId}} | Report#: {{reportNo}} | Color: {{color}} | Clarity: {{clarity}} | Cts: {{cts}}',
-    buyerLineTemplate: '',
+    // {{buyerLine}} only renders at all when a buyer name is actually present
+    // on the row (see excelParser.js's group-building) - so a demand with no
+    // buyer never ends with a dangling "Regards," and nothing after it.
+    buyerLineTemplate: 'Regards,\n{{buyerName}}',
     lineItemSeparator: '\n',
   };
 }

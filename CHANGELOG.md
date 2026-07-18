@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.1
+
+- Fix: a phone number that isn't actually a registered WhatsApp account previously still showed "Sent" (WhatsApp Web accepted the send locally without a valid destination) - the app now checks with WhatsApp before sending and fails clearly instead, so "Sent" always means it really reached a real account.
+- Fix: editing a draft's Broker Name or Buyer Name in the Edit form updated those fields but left the message text's greeting/signature unchanged, so a message could go out reading "Dear ," or "Regards," with nothing filled in even though the form showed the correct names. The message text now updates live as you type those two fields (only when it still looks like this app's own generated wording - a hand-customized message is never silently overwritten).
+- Fix: a demand with no buyer name ended with a dangling "Regards," and nothing after it; the signature line is now left out entirely when there's no buyer name, for every new import going forward.
+- Redesign the Column Mapping table for clarity: bigger text, more row spacing, row hover highlighting, and a custom-styled dropdown arrow replacing the small native browser one. The Setup Wizard's dialog is now wide enough that this table no longer gets clipped inside it.
+- Fix: the app's main content area left large unused margins on wide screens, and a short sidebar left a stark empty gap next to a long table; both now use the available width and height properly.
+- Log the actual WhatsApp disconnect reason to `server.log` so a future disconnect is diagnosable instead of only ever showing as a brief status flicker on the dashboard.
+
 ## 1.5.0
 
 - Add a new **Archive** page in the sidebar. Uploading a new workbook now moves every row from earlier imports there automatically (whatever its status), so the main Messages list always shows only the latest import. Sending a message also moves it to Archive immediately. Archived rows stay fully viewable, editable, and sendable.

@@ -40,6 +40,8 @@ function providerWithoutBrowser() {
   provider._autoReconnectTimer = null;
   provider._autoReconnectDelayMs = 5;
   provider._maxAutoReconnectAttempts = 3;
+  provider.queue = [];
+  provider.processing = false;
   provider.authDataPath = resolveAuthDataPath(path.join(os.tmpdir(), 'unused-provider-data'));
   provider.authSessionPath = path.join(provider.authDataPath, 'session');
   return provider;
@@ -475,4 +477,40 @@ test('repeated non-LOGOUT disconnects eventually fall back to requiring manual r
   assert.equal(startCalls, 2, 'only tried the automatic probe reconnect twice, matching the cap');
   assert.equal(provider.status, 'disconnected');
   assert.match(provider.lastError, /could not reconnect automatically/i);
+});
+
+test('sendMessage rejects a phone number that is not a registered WhatsApp account, without calling client.sendMessage', async () => {
+  const provider = providerWithoutBrowser();
+  provider.status = 'ready';
+  const sendCalls = [];
+  provider.client = {
+    getNumberId: async () => null,
+    sendMessage: async (...args) => { sendCalls.push(args); return { id: { _serialized: 'wamid.should-not-happen' } }; },
+  };
+
+  await assert.rejects(
+    provider.sendMessage('9876543210', 'Hello'),
+    /not on WhatsApp/i,
+  );
+  assert.equal(sendCalls.length, 0);
+});
+
+test('sendMessage uses the canonical wid returned by getNumberId for a registered account', async () => {
+  const provider = providerWithoutBrowser();
+  provider.status = 'ready';
+  const sendCalls = [];
+  provider.client = {
+    getNumberId: async (chatId) => {
+      assert.equal(chatId, '919876543210@c.us');
+      return { _serialized: '919876543210@c.us' };
+    },
+    sendMessage: async (chatId, body) => {
+      sendCalls.push({ chatId, body });
+      return { id: { _serialized: 'wamid.real-send' } };
+    },
+  };
+
+  const waMessageId = await provider.sendMessage('9876543210', 'Hello there');
+  assert.equal(waMessageId, 'wamid.real-send');
+  assert.deepEqual(sendCalls, [{ chatId: '919876543210@c.us', body: 'Hello there' }]);
 });

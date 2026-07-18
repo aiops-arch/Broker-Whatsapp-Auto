@@ -249,26 +249,34 @@ a { color: var(--navy); }
 
 /* ===== App shell: sidebar + main content ===== */
 .app-shell {
-  max-width: 1360px;
+  max-width: min(1760px, 96vw);
   margin: 0 auto;
   padding: var(--space-5) var(--space-5) 72px;
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: var(--space-5);
 }
 
 .sidebar {
   position: sticky;
   top: 76px;
+  align-self: stretch;
   flex: 0 0 220px;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: var(--space-1);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-3);
   box-shadow: var(--shadow-sm);
+  /* align-items: stretch (on .app-shell) + align-self: stretch here make the
+     sidebar match the main column's full height (instead of just wrapping
+     its own nav items), so a short nav never leaves a stark, unstyled empty
+     gap next to a tall table - the nav items stay pinned to the top and the
+     rest of the card just reads as part of the same panel, staying visible
+     via position: sticky while a long page scrolls underneath. */
 }
 .nav-item {
   display: flex;
@@ -901,7 +909,11 @@ input[type="text"]:focus, input[type="search"]:focus { border-color: var(--navy)
 }
 
 /* ===== Setup wizard ===== */
-.wizard-modal { max-width: 660px; width: 100%; }
+/* Wide enough that Step 1's column mapping table (min-width: 880px, see
+   below) fits without its own horizontal scrollbar clipping headers/cells at
+   the modal's edge - the other, simpler steps just get a little extra
+   breathing room instead. */
+.wizard-modal { max-width: 1000px; width: 100%; }
 .wizard-steps {
   display: flex;
   gap: 6px;

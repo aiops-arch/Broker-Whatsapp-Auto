@@ -285,6 +285,15 @@ Safety rules that apply to every flow:
 - **Failure/recovery:** Rows imported before this behavior shipped keep whatever placeholder text they already had - this only changes generation for new imports.
 - **Persistence:** None beyond the normal `messages_log` row from `DRAFT-002`.
 
+### DRAFT-006 — Edit form keeps the message text in sync with Broker/Buyer Name
+
+- **Trigger:** The operator types into the Broker Name or Buyer Name field while a draft is open in `DRAFT-003`'s edit form.
+- **Prerequisites:** The message's greeting (first line) or signature (a line reading exactly `Regards,`) still matches the shape this app itself generates.
+- **Flow:** As the operator types, the greeting line and/or the trailing signature block in the message textarea are live-patched to the newly typed name - the metadata fields (which the server stores separately) and the visible message text can no longer silently disagree.
+- **Success:** Filling in Broker Name/Buyer Name and saving sends a message whose greeting/signature actually contain those names, instead of the operator having to separately hand-retype the message body too.
+- **Failure/recovery:** If the message no longer matches the recognizable shape (a hand-customized greeting/signature, or no `Regards,` line at all), nothing is auto-patched - the operator's own wording is never overwritten silently.
+- **Persistence:** None beyond the normal `messages_log.message` update from `DRAFT-003`.
+
 ---
 
 ## Archive
@@ -373,6 +382,15 @@ Safety rules that apply to every flow:
 - **Success:** The confirmed row sends exactly like any other explicit send.
 - **Failure/recovery:** Bulk actions (**Send selected**, **Send all drafts**) and auto-send (`IMP-005`) never confirm on the operator's behalf - a flagged row in a bulk batch is skipped and reported, never sent silently.
 - **Persistence:** Same as `SEND-001`; the `duplicate_of_id` reference is not cleared by sending.
+
+### SEND-008 — Registered-number check before every send
+
+- **Trigger:** Any send attempt (`SEND-001` through `SEND-003`, `SEND-007`, `IMP-005`) reaches the WhatsApp provider.
+- **Prerequisites:** WhatsApp ready.
+- **Flow:** Before handing the message to WhatsApp, the provider asks WhatsApp's own servers whether the resolved phone number is a real, registered account. Only a positive result proceeds to the actual send, using the canonical WhatsApp ID the server returns (not just the app's own guessed formatting) as the destination.
+- **Success:** A message only ever reports `sent` for a number that is provably reachable on WhatsApp.
+- **Failure/recovery:** An unregistered number fails immediately with a clear, specific reason, instead of the client silently accepting the send locally for a destination that can never actually receive it (previously indistinguishable from a real send once WhatsApp acknowledged it).
+- **Persistence:** None beyond the normal failure/error handling already covered by `SEND-001`.
 
 ---
 
@@ -511,7 +529,7 @@ Safety rules that apply to every flow:
 | --- | --- |
 | `auth-recovery.test.js` | `AUTH-005` |
 | `session-store.test.js` | `AUTH-002`, `AUTH-004` |
-| `whatsapp-provider.test.js` | `WA-001` to `WA-007` |
+| `whatsapp-provider.test.js` | `WA-001` to `WA-007`, `SEND-008` |
 | `excel-import.test.js` | `IMP-002`, `IMP-003`, `DRAFT-002`, `DRAFT-005`, `CONFIG-002` (default mapping reproduces legacy output byte-for-byte) |
 | `message-config.test.js` | `CONFIG-002`, `CONFIG-003` (mapping/template validation and safe rendering) |
 | `config-routes.test.js` | `CONFIG-002`, `CONFIG-003`, `CONFIG-004` |
@@ -522,6 +540,7 @@ Safety rules that apply to every flow:
 | `content-duplicate.test.js` | `DRAFT-004` |
 | `auto-send.test.js` | `IMP-005`, `ARCHIVE-002` |
 | `archive.test.js` | `ARCHIVE-001`, `ARCHIVE-002` |
+| `message-patch.test.js` | `DRAFT-006` |
 | `backup.test.js` | `BACKUP-001` to `BACKUP-005` |
 | `runtime-logger.test.js` | `UI-004` |
 | `installer-definition.test.js` | `LIFE-001`, `LIFE-002` |

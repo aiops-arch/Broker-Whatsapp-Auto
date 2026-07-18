@@ -1326,6 +1326,17 @@ async function reconcileUncertain(id, decision, button, controller) {
 }
 
 // ---------- Modal: Edit ----------
+// The message body is free text the operator can hand-customize, so editing
+// it is never fully automatic - but Broker Name/Buyer Name changing the
+// metadata columns while the greeting/signature *text* silently keeps
+// whatever was there before is exactly how a real "Dear ," / "Regards," (with
+// the field showing the right name right above it) went out to a broker. As
+// the operator types into Broker Name/Buyer Name, live-patch the message's
+// greeting line and signature block IF they still look like the ones this
+// app itself generates - never touching a message that's already been
+// customized away from that shape. (withPatchedGreeting/withPatchedSignature
+// live in messagePatch.js, loaded before this file, so their pure string
+// logic is unit-testable in Node without a DOM.)
 function openEditModal(row, controller) {
   if (!row) return;
   const id = row.id;
@@ -1354,6 +1365,15 @@ function openEditModal(row, controller) {
     </div>
   `;
   document.getElementById('modalBackdrop').classList.add('open');
+
+  document.getElementById('editBroker').addEventListener('input', (e) => {
+    const textarea = document.getElementById('editMessage');
+    textarea.value = withPatchedGreeting(textarea.value, e.target.value.trim());
+  });
+  document.getElementById('editBuyer').addEventListener('input', (e) => {
+    const textarea = document.getElementById('editMessage');
+    textarea.value = withPatchedSignature(textarea.value, e.target.value.trim());
+  });
 
   document.getElementById('cancelEditBtn').addEventListener('click', closeModal);
   document.getElementById('saveEditBtn').addEventListener('click', async () => {

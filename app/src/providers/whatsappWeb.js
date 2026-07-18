@@ -1005,8 +1005,24 @@ class WhatsAppWebProvider extends EventEmitter {
         if (!this.isReady()) {
           throw new Error(`WhatsApp is not connected (status: ${this.status}). Finish connecting it first.`);
         }
-        const chatId = this.formatChatId(job.phone);
-        if (!chatId) throw new Error('No valid phone number for this broker.');
+        const guessedChatId = this.formatChatId(job.phone);
+        if (!guessedChatId) throw new Error('No valid phone number for this broker.');
+
+        // WhatsApp Web will accept client.sendMessage() for a WID that was
+        // only ever guessed from digits and isn't actually a registered
+        // account - the call still resolves with a message id (and can even
+        // still pick up a later 'sent' delivery ack), so nothing downstream
+        // can tell it apart from a real send that just never reaches anyone.
+        // A real server round-trip up front catches that before it ever
+        // looks like a successful send, and its returned wid is also the
+        // canonical one WhatsApp itself resolves to for that number -
+        // sturdier than our own guessed string for edge cases (e.g. a
+        // number ported between countries).
+        const registeredWid = await this.client.getNumberId(guessedChatId);
+        if (!registeredWid) {
+          throw new Error(`This phone number is not on WhatsApp (checked ${guessedChatId.replace('@c.us', '')}). Verify the number and try again.`);
+        }
+        const chatId = registeredWid._serialized || guessedChatId;
 
         let sentMessage;
         if (job.attachmentPath) {

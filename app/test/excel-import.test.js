@@ -80,6 +80,25 @@ test('a row with no broker in the sheet still generates the full message, not a 
   assert.match(groups[0].message, /StoneId: S-1/);
 });
 
+test('a row with no buyer name never ends with a dangling "Regards," line', async (t) => {
+  const filePath = path.join(tempDirectory(t), 'missing-buyer.xlsx');
+  await writeWorkbook(filePath, HEADERS, [[
+    'INV-1', new Date('2026-07-17T00:00:00Z'), 'Example Party', 'S-1', 'R-1',
+    'D', 'VS1', 1.2, 'Example Broker', '919876543210', '', '',
+  ]]);
+
+  const groups = await parseWorkbook(filePath);
+  assert.equal(groups.length, 1);
+  assert.equal(
+    groups[0].message,
+    // {{buyerLine}} renders as '' when there's no buyer name - leaves a
+    // trailing blank line (harmless/invisible in a chat message) instead of
+    // ever showing a "Regards," signature with nothing after it.
+    "Dear Example Broker,\n\nPlease find today's demand:\n\nParty Name: Example Party\n1) StoneId: S-1 | Report#: R-1 | Color: D | Clarity: VS1 | Cts: 1.20\n\n",
+  );
+  assert.doesNotMatch(groups[0].message, /Regards,/);
+});
+
 test('dedupComponentSignature sorts multiple stone ids regardless of row order', async (t) => {
   const filePath = path.join(tempDirectory(t), 'multi-stone.xlsx');
   await writeWorkbook(filePath, HEADERS, [
