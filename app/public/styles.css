@@ -693,8 +693,13 @@ input[type="text"]:focus, input[type="search"]:focus { border-color: var(--navy)
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ===== Broker table ===== */
-#brokerTable, #logTable { width: 100%; border-collapse: collapse; font-size: 12.8px; }
-#brokerTable th, #logTable th {
+/* .log-table is shared by both #logTable (Messages) and #archiveLogTable
+   (Archive) - they're built from the exact same logRowHtml() markup, so
+   these rules apply identically to both instead of only ever matching the
+   Messages table's id and leaving Archive to fall back to unstyled,
+   unevenly auto-sized browser table defaults. */
+#brokerTable, .log-table { width: 100%; border-collapse: collapse; font-size: 12.8px; }
+#brokerTable th, .log-table th {
   text-align: left;
   padding: 8px 10px;
   color: var(--ink-muted);
@@ -705,15 +710,15 @@ input[type="text"]:focus, input[type="search"]:focus { border-color: var(--navy)
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
-#brokerTable td, #logTable td {
+#brokerTable td, .log-table td {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
-#brokerTable tbody tr:hover, #logTable tbody tr:hover { background: var(--surface-sunken); }
+#brokerTable tbody tr:hover, .log-table tbody tr:hover { background: var(--surface-sunken); }
 .phone-cell { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 .name-cell { font-weight: 600; }
-#logTable .name-cell, #logTable td:nth-child(4) {
+.log-table .name-cell, .log-table td:nth-child(4) {
   max-width: 170px;
   white-space: nowrap;
   overflow: hidden;
@@ -769,7 +774,7 @@ input[type="text"]:focus, input[type="search"]:focus { border-color: var(--navy)
 .search-wrap svg { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; opacity: .5; }
 
 .chk-col { width: 32px; }
-#logTable input[type="checkbox"], #brokerTable input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; }
+.log-table input[type="checkbox"], #brokerTable input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; }
 
 .bulk-toolbar { margin-top: -4px; }
 .bulk-toolbar #selectedCount { font-family: var(--font-data); }
@@ -1104,11 +1109,11 @@ input[type="text"]:focus, input[type="search"]:focus { border-color: var(--navy)
 @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ===== Row send-result flash ===== */
-#logTable tbody tr.flash-success, #logTable tbody tr.flash-failed {
+.log-table tbody tr.flash-success, .log-table tbody tr.flash-failed {
   animation: row-flash 1.6s ease;
 }
-#logTable tbody tr.flash-success { --flash-color: var(--success-bg); }
-#logTable tbody tr.flash-failed { --flash-color: var(--danger-bg); }
+.log-table tbody tr.flash-success { --flash-color: var(--success-bg); }
+.log-table tbody tr.flash-failed { --flash-color: var(--danger-bg); }
 @keyframes row-flash {
   0% { background: var(--flash-color); }
   70% { background: var(--flash-color); }

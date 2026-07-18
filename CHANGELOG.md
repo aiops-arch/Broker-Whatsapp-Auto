@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.4
+
+- Fix: the Archive table was rendering with none of the Messages table's styling (padding, column widths, font size) because every table-styling CSS rule targeted the Messages table's id specifically. Both tables now share one class so Archive looks and behaves identically to Messages.
+
 ## 1.5.3
 
 - Add a delivery-confirmation safety net: a message is no longer assumed delivered the instant it's handed to WhatsApp. It now waits for WhatsApp's own acknowledgement before showing as confirmed, and if a "Sent" message goes more than 2 minutes with no acknowledgement at all, a "Not confirmed" warning appears on it (Messages, Archive, and the message view) so a send that silently never reached anyone doesn't just look identical to one that did.
