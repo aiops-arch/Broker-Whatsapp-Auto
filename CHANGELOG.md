@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.5
+
+- The uninstaller now asks whether to also permanently delete local application data (database, WhatsApp login session, device password, Settings) - previously it never removed this data at all (by design, so an in-place upgrade never loses anything), which meant a "fresh" reinstall after uninstalling silently resumed the old password/WhatsApp link/database instead of actually starting clean. Choosing No keeps today's exact preserve-on-upgrade behavior; choosing Yes gives a genuinely clean removal.
+
 ## 1.5.4
 
 - Fix: the Archive table was rendering with none of the Messages table's styling (padding, column widths, font size) because every table-styling CSS rule targeted the Messages table's id specifically. Both tables now share one class so Archive looks and behaves identically to Messages.

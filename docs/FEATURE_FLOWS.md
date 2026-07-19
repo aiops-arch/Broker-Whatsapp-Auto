@@ -57,10 +57,10 @@ Safety rules that apply to every flow:
 
 - **Trigger:** User chooses Stop or Windows Uninstall.
 - **Prerequisites:** Installed application.
-- **Flow:** Stop requests graceful HTTP/WhatsApp shutdown, then performs path-contained cleanup of owned descendants if required. Uninstall removes registered application files and shortcuts.
-- **Success:** No owned server/browser process remains. Application entry is removed.
-- **Failure/recovery:** Forced cleanup is limited to processes belonging to the intended installation. Retained operational folders can be backed up or removed manually later.
-- **Persistence:** Operational data is intentionally preserved by uninstall to prevent accidental loss.
+- **Flow:** Stop requests graceful HTTP/WhatsApp shutdown, then performs path-contained cleanup of owned descendants if required. Uninstall stops the app first, removes registered application files and shortcuts, then explicitly asks (Yes/No) whether to also permanently delete local operational data (database, WhatsApp login session, device password, Settings).
+- **Success:** No owned server/browser process remains. Application entry is removed. Choosing Yes leaves the install directory fully empty; choosing No leaves operational data intact for a later reinstall to resume, exactly as an in-place upgrade (`LIFE-002`) already does automatically.
+- **Failure/recovery:** Forced cleanup is limited to processes belonging to the intended installation. The data-removal prompt only ever appears on an explicit uninstall - a normal version-to-version upgrade never runs the uninstaller and can never trigger it.
+- **Persistence:** Operational data is preserved by default; only removed if the operator explicitly confirms during uninstall.
 
 ---
 
