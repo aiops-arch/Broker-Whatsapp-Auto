@@ -416,6 +416,27 @@ function renderConnectionBox(wa) {
     return;
   }
 
+  if (wa.status === 'starting' && wa.reconnecting) {
+    // A disconnect that leaves the saved login intact (a network blip, a
+    // Chromium crash, a slow handshake - anything short of the phone itself
+    // unlinking the device) is recovering on its own here - the setup
+    // buttons are deliberately de-emphasized (not the default action) so
+    // this never reads as "please act now", the way a cold "Starting
+    // WhatsApp setup..." screen would.
+    qrBox.innerHTML = `
+      <p class="muted">WhatsApp had a brief interruption and is reconnecting automatically (attempt ${wa.reconnectAttempt}/${wa.reconnectMax}) - no action needed.</p>
+      <p class="qr-hint">This can take a few minutes for a longer outage. It keeps retrying on its own and will resume without a new QR/code unless the phone itself unlinked the device.</p>
+      <div class="connection-actions">
+        <button class="view-link" id="waUsePhoneBtn" type="button">Set up again now instead</button>
+        <button class="view-link" id="waUseQrBtn" type="button">Set up with QR instead</button>
+        ${resetSetupButtonMarkup()}
+      </div>
+    `;
+    bindSetupSwitches();
+    bindResetSetupBtn();
+    return;
+  }
+
   if (wa.status === 'starting' || wa.status === 'authenticated') {
     qrBox.innerHTML = `
       <p class="muted">${wa.status === 'authenticated' ? 'WhatsApp accepted the login. Finishing the connection...' : 'Starting WhatsApp setup...'}</p>
@@ -740,7 +761,9 @@ async function refreshStatus() {
   document.getElementById('providerLabel').textContent = data.whatsapp.label || 'WhatsApp';
 
   const pill = document.getElementById('statusPill');
-  pill.textContent = WHATSAPP_STATUS_LABEL[data.whatsapp.status] || data.whatsapp.status;
+  pill.textContent = data.whatsapp.reconnecting
+    ? 'reconnecting'
+    : (WHATSAPP_STATUS_LABEL[data.whatsapp.status] || data.whatsapp.status);
   pill.className = 'status-pill status-' + data.whatsapp.status;
 
   const hint = document.getElementById('reviewHint');
@@ -759,6 +782,9 @@ async function refreshStatus() {
   if (data.whatsapp.status === 'ready') {
     dot.className = 'dot on';
     label.textContent = 'live · ready to send';
+  } else if (data.whatsapp.reconnecting) {
+    dot.className = 'dot warn';
+    label.textContent = `reconnecting (attempt ${data.whatsapp.reconnectAttempt})…`;
   } else if (data.whatsapp.status === 'disconnected') {
     dot.className = 'dot';
     label.textContent = 'disconnected';

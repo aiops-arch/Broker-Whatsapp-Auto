@@ -8,12 +8,12 @@ Broker Demand Desk is a self-contained Windows application that converts a daily
 
 | Item | Value |
 | --- | --- |
-| Version | `1.5.5` |
-| Installer | [`installer/output/BrokerDemandDesk-Setup-1.5.5.exe`](installer/output/BrokerDemandDesk-Setup-1.5.5.exe) |
-| SHA-256 | `15A6EB80CEE4259B1975DD720CADAFDA9601C56CE9D9942821EA91D86FBFD796` |
+| Version | `1.5.6` |
+| Installer | [`installer/output/BrokerDemandDesk-Setup-1.5.6.exe`](installer/output/BrokerDemandDesk-Setup-1.5.6.exe) |
+| SHA-256 | `AB97B33B2D68AA8B038D0EC2D563FA208BB073549670B0EA4C75718125DDB883` |
 | Platform | Windows 10/11 x64 |
 | Runtime | Bundled Node.js and Chromium; no separate Node, Docker or database installation required |
-| Test status | 137 automated tests passing, plus desktop/mobile browser verification |
+| Test status | 144 automated tests passing, plus desktop/mobile browser verification |
 
 The installer is not currently code-signed, so Windows can display an **Unknown Publisher** warning. Verify the SHA-256 checksum before distribution.
 

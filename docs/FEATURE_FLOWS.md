@@ -169,13 +169,13 @@ Safety rules that apply to every flow:
 - **Failure/recovery:** Reset refuses a ready account and refuses linked/junction paths.
 - **Persistence:** Only contained incomplete LocalAuth data is removed.
 
-### WA-007 — Bounded automatic reconnect on a live disconnect
+### WA-007 — Bounded automatic reconnect on any session-preserving failure
 
-- **Trigger:** A ready WhatsApp client emits `disconnected` for any reason other than an explicit phone-initiated logout.
-- **Prerequisites:** Provider previously reached `ready`.
-- **Flow:** The library only deletes the saved `LocalAuth` session on the `'LOGOUT'` reason; every other reason (a connection hiccup, network blip, etc.) leaves it intact. The provider retries a silent probe restart, up to a bounded number of attempts with a short delay between them, instead of immediately demanding a manual re-link.
-- **Success:** A transient disconnect recovers on its own; the operator sees a brief "reconnecting automatically" status instead of being dropped to setup.
-- **Failure/recovery:** An explicit `'LOGOUT'` reason still fully retires the client and asks the operator to re-link, unchanged from before. Exceeding the retry cap falls back to the same manual re-link request.
+- **Trigger:** Any of the following happens to the active WhatsApp client: a live `disconnected` event for a reason other than an explicit phone-initiated logout; the Puppeteer browser process crashes or closes unexpectedly; the browser fails to launch within the startup window; `client.initialize()` itself rejects; or an authenticated login gets stuck and never reaches `ready` within the handshake window.
+- **Prerequisites:** None - covers a fresh cold start, mid-setup, and an already-`ready` session alike, since none of these failure modes ever touch the saved `LocalAuth` session on disk (only an explicit phone-side `'LOGOUT'` does).
+- **Flow:** The provider retries a silent probe restart with exponential backoff (starting at a few seconds, capped at one minute between attempts), for up to 500 attempts - roughly 8+ hours of continuous retrying - before ever asking the operator to act. Any explicit operator action (a fresh setup attempt, Disconnect, Reset WhatsApp setup) immediately cancels a running retry cycle rather than letting it linger or fight with the new action.
+- **Success:** A transient disconnect of any of the above kinds recovers on its own. The dashboard shows a distinct "reconnecting automatically (attempt N/500) - no action needed" message instead of the generic first-time setup screen, so the operator never mistakes an automatic recovery in progress for something requiring their input.
+- **Failure/recovery:** An explicit `'LOGOUT'` reason (the phone unlinking the device) still fully retires the client and asks the operator to re-link, unchanged - this is the one case that genuinely requires it. Exceeding the retry cap falls back to the same manual re-link request. A deterministic client-construction error (a real code/configuration defect, not a transient runtime failure) is deliberately excluded from this retry loop and surfaces immediately instead of silently retrying for hours.
 - **Persistence:** None beyond in-memory retry-attempt state; the `LocalAuth` profile itself is untouched by this flow.
 
 ---

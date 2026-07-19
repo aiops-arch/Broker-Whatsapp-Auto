@@ -1,6 +1,9 @@
 # Changelog
 
-## 1.5.5
+## 1.5.6
+
+- Full audit of every place WhatsApp could disconnect. Found and fixed four paths that previously demanded an immediate manual re-link even though the saved login was completely untouched: a Chromium crash/unexpected browser close, a browser that fails to launch in time, an internal `initialize()` failure, and a login that gets stuck between "accepted" and "ready". All four now get the same automatic, silent reconnect already used for a plain network disconnect - the app tries far harder (up to ~8 hours of retrying, backing off gradually) before ever asking the operator to re-link, and only an actual phone-side unlink still requires it.
+- The dashboard now clearly shows "reconnecting automatically - no action needed" during one of these automatic recoveries, instead of looking identical to the first-time setup screen and inviting the operator to restart linking mid-recovery.
 
 - The uninstaller now asks whether to also permanently delete local application data (database, WhatsApp login session, device password, Settings) - previously it never removed this data at all (by design, so an in-place upgrade never loses anything), which meant a "fresh" reinstall after uninstalling silently resumed the old password/WhatsApp link/database instead of actually starting clean. Choosing No keeps today's exact preserve-on-upgrade behavior; choosing Yes gives a genuinely clean removal.
 

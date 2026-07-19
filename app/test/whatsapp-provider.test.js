@@ -287,33 +287,65 @@ test('a slower stale QR encoding can never overwrite a newer QR', async () => {
   assert.equal(provider.statusRevision, 1);
 });
 
-test('unexpected Puppeteer browser disconnect retires the active setup client', async () => {
+test('an unexpected Puppeteer browser disconnect attempts a bounded automatic reconnect instead of an immediate re-link', async () => {
   const provider = providerWithoutBrowser();
   const { client, browser } = fakeBrowserClient();
   provider.status = 'qr';
   provider._bindClientEvents(client, 'qr', provider._generation);
   provider._attachBrowserDisconnect(client, provider._generation);
+  const starts = [];
+  provider._startClient = async (...args) => { starts.push(args); };
 
   browser.emit('disconnected');
-  await nextTurn();
 
-  assert.equal(provider.status, 'disconnected');
-  assert.equal(provider.client, null);
-  assert.match(provider.lastError, /closed unexpectedly/i);
+  // The LocalAuth session on disk is untouched by a Chromium crash - this
+  // deserves the same silent retry as a live WAState disconnect, not an
+  // immediate demand to re-link.
+  assert.equal(provider.status, 'starting');
+  assert.match(provider.lastError, /Reconnecting automatically \(attempt 1\/3\)/);
+  assert.equal(starts.length, 0, 'the probe restart is delayed, not immediate');
+
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.deepEqual(starts, [['probe']]);
 });
 
-test('authenticated state has a bounded ready timeout', async () => {
+test('a stuck authenticated-but-not-ready handshake attempts a bounded automatic reconnect instead of an immediate re-link', async () => {
   const provider = providerWithoutBrowser();
   provider._authenticatedReadyTimeoutMs = 10;
   const { client } = fakeBrowserClient();
   provider.status = 'qr';
   provider._bindClientEvents(client, 'qr', provider._generation);
+  const starts = [];
+  provider._startClient = async (...args) => { starts.push(args); };
+
+  client.emit('authenticated');
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  // WhatsApp already accepted this login - a slow final handshake is not a
+  // broken session, so it gets a silent retry rather than forcing the
+  // operator to re-scan a QR/re-enter a phone code they already completed.
+  assert.equal(provider.status, 'starting');
+  assert.match(provider.lastError, /Reconnecting automatically \(attempt 1\/3\)/);
+
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(starts, [['probe']]);
+});
+
+test('a stuck authenticated-but-not-ready handshake still eventually requires manual re-link once the retry cap is exceeded', async () => {
+  const provider = providerWithoutBrowser();
+  provider._authenticatedReadyTimeoutMs = 10;
+  provider._maxAutoReconnectAttempts = 0; // exceeded on the very first attempt
+  const { client } = fakeBrowserClient();
+  provider.status = 'qr';
+  provider._bindClientEvents(client, 'qr', provider._generation);
+  provider._startClient = async () => {};
 
   client.emit('authenticated');
   await new Promise((resolve) => setTimeout(resolve, 25));
 
   assert.equal(provider.status, 'disconnected');
-  assert.match(provider.lastError, /did not become ready/i);
+  assert.match(provider.lastError, /could not reconnect automatically/i);
 });
 
 test('shutdown closes all owned clients but preserves the LocalAuth profile', async (t) => {
@@ -477,6 +509,106 @@ test('repeated non-LOGOUT disconnects eventually fall back to requiring manual r
   assert.equal(startCalls, 2, 'only tried the automatic probe reconnect twice, matching the cap');
   assert.equal(provider.status, 'disconnected');
   assert.match(provider.lastError, /could not reconnect automatically/i);
+});
+
+test('a browser that never finishes launching attempts a bounded automatic reconnect instead of an immediate re-link', async () => {
+  const provider = providerWithoutBrowser();
+  provider._startupTimeoutMs = 10;
+  const client = new EventEmitter();
+  client.initialize = () => new Promise(() => {}); // never resolves
+  client.destroy = async () => undefined;
+  provider.client = client;
+  provider.status = 'starting';
+  const starts = [];
+  provider._startClient = async (...args) => { starts.push(args); };
+
+  provider._initialize(client, provider._generation);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.equal(provider.status, 'starting');
+  assert.match(provider.lastError, /Reconnecting automatically \(attempt 1\/3\)/);
+
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(starts, [['probe']]);
+});
+
+test('an initialize() rejection attempts a bounded automatic reconnect instead of an immediate re-link', async () => {
+  const provider = providerWithoutBrowser();
+  const client = new EventEmitter();
+  client.initialize = async () => { throw new Error('boom'); };
+  client.destroy = async () => undefined;
+  provider.client = client;
+  provider.status = 'starting';
+  const starts = [];
+  provider._startClient = async (...args) => { starts.push(args); };
+
+  provider._initialize(client, provider._generation);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(provider.status, 'starting');
+  assert.match(provider.lastError, /Reconnecting automatically \(attempt 1\/3\)/);
+
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(starts, [['probe']]);
+});
+
+test('getStatus reports reconnecting state only while an auto-reconnect cycle is actually in progress', () => {
+  const provider = providerWithoutBrowser();
+  assert.equal(provider.getStatus().reconnecting, false);
+
+  provider.status = 'starting';
+  provider._autoReconnectAttempts = 2;
+  const status = provider.getStatus();
+  assert.equal(status.reconnecting, true);
+  assert.equal(status.reconnectAttempt, 2);
+  assert.equal(status.reconnectMax, 3);
+
+  // A fresh cold start (status 'starting', but no attempts yet) must not be
+  // mistaken for a recovery already in progress.
+  provider._autoReconnectAttempts = 0;
+  assert.equal(provider.getStatus().reconnecting, false);
+});
+
+test('a new explicit setup attempt cancels any in-progress auto-reconnect cycle instead of letting it linger', async () => {
+  const provider = providerWithoutBrowser();
+  provider._autoReconnectAttempts = 2;
+  provider._autoReconnectTimer = setTimeout(() => {}, 100000);
+  provider._startClient = async () => {};
+
+  await provider.beginSetupWithQr();
+
+  assert.equal(provider._autoReconnectAttempts, 0);
+  assert.equal(provider._autoReconnectTimer, null);
+});
+
+test('disconnect() cancels any in-progress auto-reconnect cycle', async () => {
+  const provider = providerWithoutBrowser();
+  provider._autoReconnectAttempts = 3;
+  provider._autoReconnectTimer = setTimeout(() => {}, 100000);
+
+  await provider.disconnect();
+
+  assert.equal(provider._autoReconnectAttempts, 0);
+  assert.equal(provider._autoReconnectTimer, null);
+});
+
+test('resetSetup() cancels any in-progress auto-reconnect cycle', async (t) => {
+  const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'wa-cancel-reconnect-test-'));
+  t.after(() => fs.promises.rm(tempRoot, { recursive: true, force: true }));
+  const authRoot = path.join(tempRoot, 'wwebjs_auth');
+  const sessionPath = path.join(authRoot, 'session');
+  await fs.promises.mkdir(sessionPath, { recursive: true });
+
+  const provider = providerWithoutBrowser();
+  provider.authDataPath = authRoot;
+  provider.authSessionPath = sessionPath;
+  provider._autoReconnectAttempts = 4;
+  provider._autoReconnectTimer = setTimeout(() => {}, 100000);
+
+  await provider.resetSetup();
+
+  assert.equal(provider._autoReconnectAttempts, 0);
+  assert.equal(provider._autoReconnectTimer, null);
 });
 
 test('sendMessage rejects a phone number that is not a registered WhatsApp account, without calling client.sendMessage', async () => {
